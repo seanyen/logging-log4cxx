@@ -18,25 +18,18 @@
 #ifndef _LOG4CXX_LAYOUT_H
 #define _LOG4CXX_LAYOUT_H
 
-#if defined(_MSC_VER)
-	#pragma warning ( push )
-	#pragma warning ( disable: 4231 4251 4275 4786 )
-#endif
-
-
 #include <log4cxx/helpers/object.h>
 #include <log4cxx/spi/optionhandler.h>
 #include <log4cxx/spi/loggingevent.h>
 
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 /**
 Extend this abstract class to create your own log layout format.
 */
-class LOG4CXX_EXPORT Layout :
-	public virtual spi::OptionHandler,
-	public virtual helpers::Object
+class LOG4CXX_EXPORT Layout
+	: public spi::OptionHandler
 {
 	public:
 		DECLARE_ABSTRACT_LOG4CXX_OBJECT(Layout)
@@ -50,8 +43,12 @@ class LOG4CXX_EXPORT Layout :
 		/**
 		Implement this method to create your own layout format.
 		*/
-		virtual void format(LogString& output,
-			const spi::LoggingEventPtr& event, log4cxx::helpers::Pool& pool) const = 0;
+		virtual void format(LogString& output, const spi::LoggingEventPtr& event) const = 0;
+		/**
+		@deprecated Backward compatability support will be removed in a future version.
+		*/
+		[[deprecated("Use format() without a Pool parameter instead")]]
+		void format(LogString& output, const spi::LoggingEventPtr& event, helpers::Pool& p) const;
 
 		/**
 		Returns the content type output by this layout. The base class
@@ -63,13 +60,23 @@ class LOG4CXX_EXPORT Layout :
 		Append the header for the layout format. The base class does
 		nothing.
 		*/
-		virtual void appendHeader(LogString& output, log4cxx::helpers::Pool& p);
+		virtual void appendHeader(LogString& output);
+		/**
+		@deprecated Backward compatability support will be removed in a future version.
+		*/
+		[[deprecated("Use appendHeader() without a Pool parameter instead")]]
+		void appendHeader(LogString& output, helpers::Pool& p);
 
 		/**
 		Append the footer for the layout format. The base class does
 		nothing.
 		*/
-		virtual void appendFooter(LogString& output, log4cxx::helpers::Pool& p);
+		virtual void appendFooter(LogString& output);
+		/**
+		@deprecated Backward compatability support will be removed in a future version.
+		*/
+		[[deprecated("Use appendFooter() without a Pool parameter instead")]]
+		void appendFooter(LogString& output, helpers::Pool& p);
 
 		/**
 		If the layout handles the throwable object contained within
@@ -77,17 +84,25 @@ class LOG4CXX_EXPORT Layout :
 		<code>false</code>. Otherwise, if the layout ignores throwable
 		object, then the layout should return <code>true</code>.
 
-		<p>The SimpleLayout, TTCCLayout,
-		PatternLayout all return <code>true</code>. The {@link
-		xml::XMLLayout XMLLayout} returns <code>false</code>.
+		<p>The SimpleLayout, FMTLayout and PatternLayout return <code>true</code>.
+		The other layouts return <code>false</code>.
 		*/
 		virtual bool ignoresThrowable() const = 0;
+
+		using spi::OptionHandler::activateOptions;
+		/**
+		\copybrief spi::OptionHandler::activateOptions()
+
+		No action is performed in this implementation.
+		*/
+		void activateOptions(  ) override;
+	protected:
+		/**
+		 * The expected length of a formatted event excluding the message text
+		 */
+		size_t getFormattedEventCharacterCount() const;
 };
 LOG4CXX_PTR_DEF(Layout);
 }
-
-#if defined(_MSC_VER)
-	#pragma warning ( pop )
-#endif
 
 #endif // _LOG4CXX_LAYOUT_H

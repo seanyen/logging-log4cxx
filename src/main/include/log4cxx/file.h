@@ -21,178 +21,147 @@
 #include <log4cxx/logger.h>
 #include <log4cxx/logstring.h>
 
-#if defined(_MSC_VER)
-	#pragma warning ( push )
-	#pragma warning ( disable: 4251 )
-#endif
-
 extern "C" {
 	struct apr_file_t;
 	struct apr_finfo_t;
 }
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 namespace helpers
 {
 class Transcoder;
-class Pool;
 }
 
 /**
-* An abstract representation of file and directory path names.
+* Holds the path to a file or directory.
 */
 class LOG4CXX_EXPORT File
 {
 	public:
 		/**
-		*   Construct a new instance.
+		*   An empty path.
 		*/
 		File();
 		/**
-		*   Construct a new instance.  Use setPath to specify path using a LogString.
-		* @param path file path in local encoding.
+		*   The file or directory at \c path.
 		*/
 		File(const char* path);
 		/**
-		*   Construct a new instance.  Use setPath to specify path using a LogString.
-		* @param path file path in current encoding.
+		*   The file or directory at \c path.
 		*/
 		File(const std::string& path);
 #if LOG4CXX_WCHAR_T_API
 		/**
-		*   Construct a new instance.  Use setPath to specify path using a LogString.
-		* @param path file path.
+		*   The file or directory at \c path.
 		*/
 		File(const wchar_t* path);
 		/**
-		*   Construct a new instance.  Use setPath to specify path using a LogString.
-		* @param path file path.
+		*   The file or directory at \c path.
 		*/
 		File(const std::wstring& path);
 #endif
-#if LOG4CXX_UNICHAR_API
-		/**
-		*   Construct a new instance.  Use setPath to specify path using a LogString.
-		* @param path file path.
-		*/
-		File(const UniChar* path);
-		/**
-		*   Construct a new instance.  Use setPath to specify path using a LogString.
-		* @param path file path.
-		*/
-		File(const std::basic_string<UniChar>& path);
-#endif
 #if LOG4CXX_CFSTRING_API
 		/**
-		*   Construct a new instance.  Use setPath to specify path using a LogString.
-		* @param path file path.
+		*   The file or directory at \c path.
 		*/
 		File(const CFStringRef& path);
 #endif
 		/**
-		 *  Copy constructor.
+		 *  A copy of \c other.
 		 */
-		File(const File& src);
+		File(const File& other);
 		/**
-		 *  Assignment operator.
+		 *  Replace this with \c other
 		 */
-		File& operator=(const File& src);
+		File& operator=(const File& other);
 		/**
-		 *  Destructor.
+		 *  Release resouces used by this.
 		 */
 		~File();
 
 		/**
-		 *  Determines if file exists.
-		 *  @param p pool.
-		 *  @return true if file exists.
+		 *  Has a path been set?
+		 *  @return true if the file name is not empty.
 		 */
-		bool exists(log4cxx::helpers::Pool& p) const;
+		bool hasPath() const;
 		/**
-		 *  Determines length of file.  May not be accurate if file is current open.
-		 *  @param p pool.
-		 *  @return length of file.
+		 *  Is this a path to an existing file or directory?
 		 */
-		size_t length(log4cxx::helpers::Pool& p) const;
+		bool exists() const;
 		/**
-		 *  Determines last modification date.
-		 *  @param p pool.
-		 *  @return length of file.
+		 *  The size in bytes of the file indicated by this.
+		 *  May not be accurate if file is current open.
 		 */
-		log4cxx_time_t lastModified(log4cxx::helpers::Pool& p) const;
+		size_t length() const;
 		/**
-		 *  Get final portion of file path.
-		 *  @return file name.
+		 *  The microseconds since 1970-01-01 when the file indicated by this was last modified.
+		 */
+		log4cxx_time_t lastModified() const;
+		/**
+		 *  The final portion of the file or directory path.
 		 */
 		LogString getName() const;
 		/**
-		 *  Get file path.
-		 *  @return file path.
+		 *  The full file or directory path.
 		 */
 		LogString getPath() const;
 		/**
-		 *  Set file path
+		 *  The full file or directory path encoded for APR use.
 		 */
-		File& setPath(const LogString&);
+		const char* getAPRPath() const;
+		/**
+		 *  Use \c newValue as the file path
+		 */
+		File& setPath(const LogString& newValue);
+
 
 		/**
-		 *  Open file.  See apr_file_open for details.
-		 *  @param file APR file handle.
-		 *  @param flags flags.
-		 *  @param perm permissions.
-		 *  @param p pool.
-		 *  @return APR_SUCCESS if successful.
+		 *   A list of files if this is a directory, otherwise an empty list.
 		 */
-		log4cxx_status_t open(apr_file_t** file, int flags,
-			int perm, log4cxx::helpers::Pool& p) const;
+		std::vector<LogString> list() const;
 
 		/**
-		 *   List files if current file is a directory.
-		 *   @param p pool.
-		 *   @return list of files in this directory, operation of non-directory returns empty list.
-		 */
-		std::vector<LogString> list(log4cxx::helpers::Pool& p) const;
-
-		/**
-		 *   Delete file.
-		 *   @param p pool.
+		 *   Attempt to remove this file or directory from persistent storage.
 		 *   @return true if file successfully deleted.
 		 */
-		bool deleteFile(log4cxx::helpers::Pool& p) const;
+		bool deleteFile() const;
 		/**
-		 *   Rename file.
-		 *   @param dest new path for file.
-		 *   @param p pool.
+		 *   Move this file or directory to the path in \c newValue.
 		 *   @return true if file successfully renamed.
 		 */
-		bool renameTo(const File& dest, log4cxx::helpers::Pool& p) const;
+		bool renameTo(const File& newValue) const;
 
 		/**
-		 *   Get path of parent directory.
-		 *   @param p pool.
+		 *   The path without the final portion.
 		 *   @return path of parent directory.
 		 */
-		LogString getParent(log4cxx::helpers::Pool& p) const;
+		LogString getParent() const;
 		/**
-		 *  Make directories recursively.
-		 *  @param p pool.
+		 *  Create the directories required for this file path.
 		 *  @return true if all requested directories existed or have been created.
 		 */
-		bool mkdirs(log4cxx::helpers::Pool& p) const;
+		bool mkdirs() const;
+
+		/**
+		 * Use \c newValue for whether the file is to be deleted when this object is destroyed.
+		 * @param newValue If true, delete file upon destruction.
+		 */
+		void setAutoDelete(bool newValue);
+
+		/**
+		 * The value of the autodelete setting.  If true, this file will be deleted when the
+		 * destructor is called.
+		 *
+		 * @return True if the file is deleted upon destruction.
+		 */
+		bool getAutoDelete() const;
 
 	private:
-		LogString path;
-		static char* convertBackSlashes(char*);
-		char* getPath(log4cxx::helpers::Pool& p) const;
+		LOG4CXX_DECLARE_PRIVATE_MEMBER_PTR(FilePrivate, m_priv)
 };
 } // namespace log4cxx
 
-
-#if defined(_MSC_VER)
-	#pragma warning (pop)
-#endif
-
-#define LOG4CXX_FILE(name) log4cxx::File(name)
+#define LOG4CXX_FILE(name) File(name)
 
 #endif // _LOG4CXX_FILE_H

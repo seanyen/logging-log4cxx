@@ -14,17 +14,15 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <log4cxx/logstring.h>
-#include <log4cxx/defaultloggerfactory.h>
-#include <log4cxx/logger.h>
 
-using namespace log4cxx;
+#include <log4cxx/spi/loggerfactory.h>
 
-IMPLEMENT_LOG4CXX_OBJECT(DefaultLoggerFactory)
+using namespace LOG4CXX_NS;
+using namespace spi;
 
-LoggerPtr DefaultLoggerFactory::makeNewLoggerInstance(
-	log4cxx::helpers::Pool& pool,
-	const LogString& name) const
+
+LoggerPtr LoggerFactory::makeNewLoggerInstance(const LogString& name) const
 {
-	return LoggerPtr(new Logger(pool, name));
+	return std::make_shared<Logger>(name);
 }
+

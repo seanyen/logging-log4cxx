@@ -18,12 +18,6 @@
 #if !defined(_LOG4CXX_LOGUNIT_H)
 #define _LOG4CXX_LOGUNIT_H
 
-
-#if defined(_MSC_VER)
-	#pragma warning (push)
-	#pragma warning ( disable: 4231 4251 4275 4786 )
-#endif
-
 #include "abts.h"
 #include <exception>
 #include <map>
@@ -83,12 +77,6 @@ class TestFixture
 			const char* actualExpr,
 			int lineno);
 #endif
-#if LOG4CXX_LOGCHAR_IS_UNICHAR || LOG4CXX_UNICHAR_API || LOG4CXX_CFSTRING_API
-		void assertEquals(const std::basic_string<log4cxx::UniChar> expected,
-			const std::basic_string<log4cxx::UniChar> actual,
-			const char* expectedExpr,
-			const char* actualExpr, int lineno);
-#endif
 		template<class T>
 		void assertEquals(const T& expected,
 			const T& actual,
@@ -120,14 +108,14 @@ void runTest(abts_case* tc, void (T::*func)())
 	{
 		(ti.*func)();
 	}
-	catch (TestException&)
+	catch (const TestException&)
 	{
 	}
-	catch (AssertException& fx)
+	catch (const AssertException& fx)
 	{
 		abts_fail(tc, fx.getMessage().c_str(), fx.getLine());
 	}
-	catch (std::exception& e)
+	catch (const std::exception& e)
 	{
 		const char* what = e.what();
 		std::ostringstream oss;
@@ -153,10 +141,10 @@ void runTestWithException(abts_case* tc, void (T::*func)())
 	{
 		(ti.*func)();
 	}
-	catch (TestException&)
+	catch (const TestException&)
 	{
 	}
-	catch (AssertException& fx)
+	catch (const AssertException& fx)
 	{
 		abts_fail(tc, fx.getMessage().c_str(), fx.getLine());
 	}
@@ -182,7 +170,7 @@ class TestSuite
 	private:
 		TestSuite(const TestSuite&);
 		TestSuite& operator=(const TestSuite&);
-		typedef std::vector<test_func> TestList;
+		typedef std::vector<std::pair<const char*,test_func>> TestList;
 		TestList test_funcs;
 		std::string filename;
 		bool disabled;
@@ -269,15 +257,11 @@ class RegisterDisabledSuite
 
 
 #define LOGUNIT_ASSERT(     x)                                  { if (!(x)) throw LogUnit::AssertException(true, #x, __LINE__); }
+#define LOGUNIT_ASSERT_MESSAGE(x, msg)                          { if (!(x)) throw LogUnit::AssertException(msg, __LINE__); }
 #define LOGUNIT_ASSERT_SRCL(x, srcLine)                         { if (!(x)) throw LogUnit::AssertException(true, #x, srcLine);  }
 #define LOGUNIT_ASSERT_EQUAL(       expected, actual)           assertEquals(expected, actual, #expected, #actual, __LINE__)
 #define LOGUNIT_ASSERT_EQUAL_SRCL(  expected, actual, srcLine)  assertEquals(expected, actual, #expected, #actual, srcLine)
 #define LOGUNIT_FAIL(msg)                                       throw LogUnit::AssertException(msg, __LINE__)
-
-
-#if defined(_MSC_VER)
-	#pragma warning (pop)
-#endif
 
 #endif
 

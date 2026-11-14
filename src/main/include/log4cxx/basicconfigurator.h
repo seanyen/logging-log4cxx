@@ -23,16 +23,17 @@
 #include <log4cxx/logstring.h>
 #include <log4cxx/spi/configurator.h>
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 class Appender;
 typedef std::shared_ptr<Appender> AppenderPtr;
 
 /**
-Use this class to quickly configure the package.
-<p>For file based configuration see
-PropertyConfigurator. For XML based configuration see
-DOMConfigurator.
+Use BasicConfigurator (static) methods to configure Log4cxx
+when not using a configuration file.
+
+For <code>key=value</code> format configuration see PropertyConfigurator.
+For XML format configuration see xml::DOMConfigurator.
 */
 class LOG4CXX_EXPORT BasicConfigurator
 {
@@ -41,16 +42,36 @@ class LOG4CXX_EXPORT BasicConfigurator
 
 	public:
 		/**
-		Add a ConsoleAppender that uses PatternLayout
-		using the PatternLayout#TTCC_CONVERSION_PATTERN and
-		prints to <code>stdout</code> to the root logger.*/
-		static void configure();
+		Add a ConsoleAppender that formats output using \c layout to the root logger.
+
+		If \c layout is not provided,
+		use a PatternLayout with the conversion pattern:
+		- <code>%%r [%%t] %%p %%c %%x - %%Y%%m%%y%%n</code> if color is enabled (the default)
+		- <code>%%r [%%t] %%p %%c %%x - %%m%%n</code> if [color is disabled](disabling-color.html)
+		*/
+		static void configure(const LayoutPtr& layout = LayoutPtr());
 
 		/**
 		Add <code>appender</code> to the root logger.
 		@param appender The appender to add to the root logger.
 		*/
 		static void configure(const AppenderPtr& appender);
+
+		/**
+		Add a ConsoleAppender that formats output using \c layout to an AsyncAppender attacted the root logger.
+
+		If \c layout is not provided,
+		use a PatternLayout with the conversion pattern:
+		- <code>%%r [%%t] %%p %%c %%x - %%Y%%m%%y%%n</code> if color is enabled (the default)
+		- <code>%%r [%%t] %%p %%c %%x - %%m%%n</code> if [color is disabled](disabling-color.html)
+		*/
+		static void configureAsync(const LayoutPtr& layout = LayoutPtr());
+
+		/**
+		Add <code>appender</code> to an AsyncAppender attacted to the root logger.
+		@param appender The appender that asynchronously formats output.
+		*/
+		static void configureAsync(const AppenderPtr& appender);
 
 		/**
 		Reset the default hierarchy to its defaut. It is equivalent to

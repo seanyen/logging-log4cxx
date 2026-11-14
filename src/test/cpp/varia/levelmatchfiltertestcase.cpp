@@ -56,8 +56,10 @@ public:
 
 	void tearDown()
 	{
-		log4cxx::spi::LoggerRepositoryPtr rep = root->getLoggerRepository().lock();
-		if (rep) {
+		auto rep = root->getLoggerRepository();
+
+		if (rep)
+		{
 			rep->resetConfiguration();
 		}
 	}
@@ -95,7 +97,7 @@ public:
 			// set the level to match
 			matchFilter->setLevelToMatch(levelArray[x]->toString());
 			LogString sbuf(LOG4CXX_STR("pass "));
-			StringHelper::toString(x, pool, sbuf);
+			StringHelper::toString(x, sbuf);
 			sbuf.append(LOG4CXX_STR("; filter set to accept only "));
 			sbuf.append(levelArray[x]->toString());
 			sbuf.append(LOG4CXX_STR(" msgs"));
@@ -135,7 +137,7 @@ public:
 			matchFilter->setLevelToMatch(levelArray[x]->toString());
 			LogString sbuf(LOG4CXX_STR("pass "));
 
-			StringHelper::toString(x, pool, sbuf);
+			StringHelper::toString(x, sbuf);
 			sbuf.append(LOG4CXX_STR("; filter set to deny only "));
 			sbuf.append(levelArray[x]->toString());
 			sbuf.append(LOG4CXX_STR(" msgs"));

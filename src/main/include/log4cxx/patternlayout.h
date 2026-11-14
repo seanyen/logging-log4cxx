@@ -18,26 +18,21 @@
 #ifndef _LOG4CXX_PATTERN_LAYOUT_H
 #define _LOG4CXX_PATTERN_LAYOUT_H
 
-#if defined(_MSC_VER)
-	#pragma warning ( push )
-	#pragma warning ( disable: 4231 4251 4275 4786 )
-#endif
-
 #include <log4cxx/layout.h>
 #include <log4cxx/pattern/loggingeventpatternconverter.h>
 #include <log4cxx/pattern/formattinginfo.h>
 #include <log4cxx/pattern/patternparser.h>
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
-LOG4CXX_LIST_DEF(LoggingEventPatternConverterList, log4cxx::pattern::LoggingEventPatternConverterPtr);
-LOG4CXX_LIST_DEF(FormattingInfoList, log4cxx::pattern::FormattingInfoPtr);
+LOG4CXX_LIST_DEF(LoggingEventPatternConverterList, LOG4CXX_NS::pattern::LoggingEventPatternConverterPtr);
+LOG4CXX_LIST_DEF(FormattingInfoList, LOG4CXX_NS::pattern::FormattingInfoPtr);
 
 /**
  * A flexible layout configurable with pattern string.
  *
  * <p>
- *  The goal of this class is to #format a {@link spi::LoggingEvent LoggingEvent} and
+ *  The goal of this class is to format a {@link spi::LoggingEvent LoggingEvent} and
  *  return the results as a string. The results depend on the <em>conversion pattern</em>.
  * </p>
  *
@@ -62,10 +57,13 @@ LOG4CXX_LIST_DEF(FormattingInfoList, log4cxx::pattern::FormattingInfoPtr);
  * <p>
  *  Let the conversion pattern be <strong>"%-5p [%t]: %m%n"</strong> and assume that the log4cxx
  *  environment was set to use a PatternLayout. Then the statements
- *  <pre>
- *      LoggerPtr root = Logger::getRoot();
+ *
+ * ~~~{.cpp}
+ *      auto root = Logger::getRootLogger();
  *      root->debug("Message 1");
- *      root->warn("Message 2");</pre>
+ *      root->warn("Message 2");
+ * ~~~
+ *
  *  would yield the output
  *  <pre>
  *      DEBUG [main]: Message 1
@@ -90,7 +88,7 @@ LOG4CXX_LIST_DEF(FormattingInfoList, log4cxx::pattern::FormattingInfoPtr);
  *  <tr>
  *      <td align="center"><strong>c</strong></td>
  *      <td>
- *          Used to output the logger of the logging event. The logger conversion specifier
+ *          Used to output the name of the logger generating the logging event. The <strong>c</strong> conversion specifier
  *          can be optionally followed by <em>precision specifier</em>, that is a decimal
  *          constant in brackets.
  *          <p>
@@ -134,6 +132,12 @@ LOG4CXX_LIST_DEF(FormattingInfoList, log4cxx::pattern::FormattingInfoPtr);
  *      </td>
  *  </tr>
  *  <tr>
+ *      <td align="center"><strong>f</strong></td>
+ *      <td>
+ *          Used to output the short file name where the logging request was issued.
+ *      </td>
+ *  </tr>
+ *  <tr>
  *      <td align="center"><strong>F</strong></td>
  *      <td>
  *          Used to output the file name where the logging request was issued.
@@ -155,8 +159,10 @@ LOG4CXX_LIST_DEF(FormattingInfoList, log4cxx::pattern::FormattingInfoPtr);
  *  <tr>
  *      <td align="center"><strong>m</strong></td>
  *      <td>
- *          Used to output the application supplied message associated with the logging
- *          event.
+ *          Used to output the application supplied message associated with the logging event.
+ *          To output in a quoted context, add set of braces containing the quote character.
+ *          Any quote character in the message is augmented with a second quote character.
+ *          For example, use %m{'} in an SQL insert statement.
  *      </td>
  *  </tr>
  *  <tr>
@@ -200,8 +206,12 @@ LOG4CXX_LIST_DEF(FormattingInfoList, log4cxx::pattern::FormattingInfoPtr);
  *      </td>
  *  </tr>
  *  <tr>
- *      <td align="center"><strong>t</strong></td>
- *      <td>Used to output the name of the thread that generated the logging event.</td>
+ *      <td align="center"><strong>t</strong><p><strong>thread</strong></p></td>
+ *      <td>Used to output the ID of the thread that generated the logging event.</td>
+ *  </tr>
+ *  <tr>
+ *      <td align="center"><strong>T</strong><p><strong>threadname</strong></p></td>
+ *      <td>Used to output the name of the thread that generated the logging event.  May not be available on all platforms.</td>
  *  </tr>
  *  <tr>
  *      <td align="center"><strong>x</strong></td>
@@ -214,10 +224,21 @@ LOG4CXX_LIST_DEF(FormattingInfoList, log4cxx::pattern::FormattingInfoPtr);
  *      <td align="center"><strong>X</strong></td>
  *      <td>
  *          Used to output the MDC (mapped diagnostic context) associated with the thread that
- *          generated the logging event. The <strong>X</strong> conversion character <em>must</em> be
- *          followed by the key for the map placed between braces, as in <strong>%X{clientNumber}</strong>
- *          where <code>clientNumber</code> is the key. The value in the MDC corresponding to
+ *          generated the logging event. All key/value pairs are output, each inside <strong>{}</strong> unless
+ *          the <strong>X</strong> is followed by a key placed between braces, as in <strong>%X{clientNumber}</strong>
+ *          where <code>clientNumber</code> is the key. In this case the value in the MDC corresponding to
  *          the key will be output.
+ *          <p>See MDC class for more details.</p>
+ *      </td>
+ *  </tr>
+ *  <tr>
+ *      <td align="center"><strong>J</strong></td>
+ *      <td>
+ *          Used to output JSON key/value pairs of all MDC (mapped diagnostic context)
+ *          entries associated with the thread that generated the logging event.
+ *          To output in a quoted context, add set of braces containing the quote character.
+ *          Any quote character in the message is augmented with a second quote character.
+ *          For example, use %J{'} in an SQL insert statement.
  *          <p>See MDC class for more details.</p>
  *      </td>
  *  </tr>
@@ -231,13 +252,15 @@ LOG4CXX_LIST_DEF(FormattingInfoList, log4cxx::pattern::FormattingInfoPtr);
  *      <td align="center"><strong>Y</strong></td>
  *      <td>
  *          Used to wrap log with color. The <strong>Y</strong> is the start of a color block.
- *          Color will be taken from the log level.
+ *          Color will be taken from the log level.  The default colors are:
  *          - `TRACE` - blue
  *          - `DEBUG` - cyan
  *          - `INFO` - green
  *          - `WARN` - yellow
  *          - `ERROR` - red
  *          - `FATAL` - magenta
+ *
+ *			These colors are all customizable.
  *      </td>
  *  </tr>
  *  <tr>
@@ -260,7 +283,7 @@ LOG4CXX_LIST_DEF(FormattingInfoList, log4cxx::pattern::FormattingInfoPtr);
  * <p>
  *  The first optional format modifier is the <em>left justification flag</em> which is
  *  just the minus (-) character. Then comes the optional <em>minimum field width</em>
- *  modifier. This is a decimal constant that represents the minimum number of characters
+ *  modifier. This is a 1 to 3 decimal digit constant that represents the minimum number of characters
  *  to output. If the data item requires fewer characters, it is padded on either the left
  *  or the right until the minimum width is reached. The default is to pad on the left
  *  (right justify) but you can specify right padding with the left justification flag. The
@@ -270,7 +293,7 @@ LOG4CXX_LIST_DEF(FormattingInfoList, log4cxx::pattern::FormattingInfoPtr);
  *
  * <p>
  *  This behavior can be changed using the <em>maximum field width</em> modifier which is
- *  designated by a period followed by a decimal constant. If the data item is longer than
+ *  designated by a period followed by a 1 to 3 decimal digit constant. If the data item is longer than
  *  the maximum field, then the extra characters are removed from the <em>beginning</em> of
  *  the data item and not from the end. For example, it the maximum field width is eight
  *  and the data item is ten characters long, then the first two characters of the data
@@ -333,10 +356,10 @@ LOG4CXX_LIST_DEF(FormattingInfoList, log4cxx::pattern::FormattingInfoPtr);
  *
  * <p>Below are some examples of conversion patterns.</p>
  *
- * <p><strong>%r [%t] %-5p %c %x - %m\n</strong></p>
+ * <p><strong>%%r [%%t] %-5p %%c %%x - %%m\n</strong></p>
  * <p>This is essentially the TTCC layout.</p>
  *
- * <p><strong>%-6r [%15.15t] %-5p %30.30c %x - %m\n</strong></p>
+ * <p><strong>%-6r [%15.15t] %-5p %30.30c %%x - %%m\n</strong></p>
  *
  * <p>
  *  Similar to the TTCC layout except that the relative time is right padded if less than 6
@@ -349,23 +372,80 @@ LOG4CXX_LIST_DEF(FormattingInfoList, log4cxx::pattern::FormattingInfoPtr);
  *  The above text is largely inspired from Peter A. Darnell and Philip E. Margolis' highly
  *  recommended book "C -- a Software Engineering Approach", ISBN 0-387-97389-3.
  * </p>
+ *
+ * <h2>Colorizing log output</h2>
+ *
+ * In order to customize the colors for the %Y specifier, options have been added to the
+ * PatternLayout in order to let users define their own colors.  Foreground/background colors
+ * can be set, as well as other text effects.  A user can also set the ANSI escape pattern
+ * directly if they want.
+ *
+ * Each level can be set individually.  The configuration options for the levels are as follows:
+ * <ul>
+ * <li>FatalColor</li>
+ * <li>ErrorColor</li>
+ * <li>WarnColor</li>
+ * <li>InfoColor</li>
+ * <li>DebugColor</li>
+ * <li>ErrorColor</li>
+ * </ul>
+ *
+ * Foreground colors may be set by using fg(), background colors may be set by using bg(), and
+ * other options(such as bold) may be set as well.
+ *
+ * Available colors:
+ * <ul>
+ * <li>Black</li>
+ * <li>Red</li>
+ * <li>Green</li>
+ * <li>Yellow</li>
+ * <li>Blue</li>
+ * <li>Magenta</li>
+ * <li>Cyan</li>
+ * <li>White</li>
+ * </ul>
+ *
+ * Available graphics modes:
+ * <ul>
+ * <li>Bold</li>
+ * <li>Dim</li>
+ * <li>Italic</li>
+ * <li>Underline</li>
+ * <li>Blinking</li>
+ * <li>Inverse</li>
+ * <li>Strikethrough</li>
+ * </ul>
+ *
+ * Combining these together, we can configure our colors as we want, shown here in XML:
+ *
+ * Set the background color to red, make text blinking and bold:
+ * <pre>
+ * &lt;param name="FatalColor" value="bg(red)|blinking|bold"/&gt;
+ * </pre>
+ *
+ * Set the foreground color to blue:
+ * <pre>
+ * &lt;param name="FatalColor" value="fg(blue)"/&gt;
+ * </pre>
+ *
+ * Set the foreground color to white and the background color to black:
+ * <pre>
+ * &lt;param name="FatalColor" value="fg(white)|bg(black)"/&gt;
+ * </pre>
+ *
+ * Clear the formatting for the specified level(no formatting will be applied):
+ * <pre>
+ * &lt;param name="FatalColor" value="none"/&gt;
+ * </pre>
+ *
+ * Set a color based off on an ANSI escape sequence(equivalent to setting fg(red)):
+ * <pre>
+ * &lt;param name="FatalColor" value="\x1b[31m"/&gt;
+ * </pre>
  */
 class LOG4CXX_EXPORT PatternLayout : public Layout
 {
-		/**
-		 * Conversion pattern.
-		 */
-		LogString conversionPattern;
-
-		/**
-		 * Pattern converters.
-		 */
-		LoggingEventPatternConverterList patternConverters;
-
-		/**
-		 * Field widths and alignment corresponding to pattern converters.
-		 */
-		FormattingInfoList patternFields;
+		LOG4CXX_DECLARE_PRIVATE_MEMBER_PTR(PatternLayoutPrivate, m_priv)
 
 	public:
 		DECLARE_LOG4CXX_OBJECT(PatternLayout)
@@ -384,9 +464,12 @@ class LOG4CXX_EXPORT PatternLayout : public Layout
 		 */
 		PatternLayout(const LogString& pattern);
 
+		~PatternLayout();
+
 		/**
-		 * Set the <strong>ConversionPattern</strong> option. This is the string which
-		 * controls formatting and consists of a mix of literal content and
+		 * Use \c conversionPattern as to control formatting.
+		 *
+		 * The pattern can be a mix of literal content and
 		 * conversion specifiers.
 		 */
 		void setConversionPattern(const LogString& conversionPattern);
@@ -394,44 +477,66 @@ class LOG4CXX_EXPORT PatternLayout : public Layout
 		/**
 		 * Returns the value of the <strong>ConversionPattern</strong> option.
 		 */
-		inline LogString getConversionPattern() const
-		{
-			return conversionPattern;
-		}
+		LogString getConversionPattern() const;
+
+		using Layout::activateOptions;
+		/**
+		\copybrief spi::OptionHandler::activateOptions()
+
+		Calls createPatternParser
+		 */
+		void activateOptions(  ) override;
 
 		/**
-		 * Call createPatternParser
-		 */
-		virtual void activateOptions(log4cxx::helpers::Pool& p);
+		\copybrief spi::OptionHandler::setOption()
 
-		virtual void setOption(const LogString& option, const LogString& value);
+		Supported options | Supported values | Default value |
+		-------------- | ---------------- | --------------- |
+		ConversionPattern | {any} | \%m\%n |
+		FatalColor | (\ref validColors "1") | magenta |
+		ErrorColor | (\ref validColors "1") | red |
+		WarnColor | (\ref validColors "1") | yellow |
+		InfoColor | (\ref validColors "1") | green |
+		DebugColor | (\ref validColors "1") | cyan |
+		TraceColor | (\ref validColors "1") | blue |
+
+		\anchor validColors (1) The word <code>None</code> or
+		<a href="https://en.wikipedia.org/wiki/ANSI_escape_code">valid ANSI escape sequence</a>.
+		A prefix of <code>\\x1b</code> will be replaced with the <code>ESC</code> character.
+		The character prefix <code>ESC</code> and suffix <code>m</code> will be added
+		to the value if it does not begin with <code>\\x1b</code>.
+		Color names can be combined with graphic modes using a <code>|</code> separator.
+		Enclose the color name in <code>bg()</code> to set the background.
+		Enclose the color name in <code>fg()</code> to set the foreground.
+
+		\sa setConversionPattern
+		 */
+		void setOption(const LogString& option, const LogString& value) override;
 
 		/**
 		 * The PatternLayout does not handle the throwable contained within
 		 * {@link spi::LoggingEvent LoggingEvents}. Thus, it returns
 		 * <code>true</code>.
 		 */
-		virtual bool ignoresThrowable() const
+		bool ignoresThrowable() const override
 		{
 			return true;
 		}
 
+		using Layout::format;
 		/**
 		 * Produces a formatted string as specified by the conversion pattern.
 		 */
-		virtual void format(    LogString& output,
-			const spi::LoggingEventPtr& event,
-			log4cxx::helpers::Pool& pool) const;
+		void format( LogString& output, const spi::LoggingEventPtr& event ) const override;
 
 	protected:
-		virtual log4cxx::pattern::PatternMap getFormatSpecifiers();
+		virtual LOG4CXX_NS::pattern::PatternMap getFormatSpecifiers();
+
+	private:
+		pattern::PatternConverterPtr createColorStartPatternConverter(const std::vector<LogString>& options);
 };
 
 LOG4CXX_PTR_DEF(PatternLayout);
 } // namespace log4cxx
-
-#if defined(_MSC_VER)
-	#pragma warning ( pop )
-#endif
 
 #endif //_LOG4CXX_PATTERN_LAYOUT_H

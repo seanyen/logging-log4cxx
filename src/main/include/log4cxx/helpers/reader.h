@@ -20,11 +20,12 @@
 
 #include <log4cxx/helpers/object.h>
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 
 namespace helpers
 {
+class Pool;
 
 /**
  * Abstract class for reading from character streams.
@@ -49,15 +50,23 @@ class LOG4CXX_EXPORT Reader : public Object
 	public:
 		/**
 		 * Closes the stream.
-		 * @param p The memory pool associated with the reader.
 		 */
-		virtual void close(Pool& p) = 0;
+		virtual void close() = 0;
 
 		/**
 		 * @return The complete stream contents as a LogString.
-		 * @param p The memory pool associated with the reader.
 		 */
-		virtual LogString read(Pool& p) = 0;
+		virtual LogString read() = 0;
+		/**
+		@deprecated Backward compatability support will be removed in a future version.
+		*/
+		[[deprecated("Use close() without a Pool parameter instead")]]
+		void close(Pool& p);
+		/**
+		@deprecated Backward compatability support will be removed in a future version.
+		*/
+		[[deprecated("Use read() without a Pool parameter instead")]]
+		LogString read(Pool& p);
 
 	private:
 		Reader(const Reader&);

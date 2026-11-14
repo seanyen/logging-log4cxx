@@ -22,7 +22,11 @@
 #include <log4cxx/helpers/inputstream.h>
 #include <log4cxx/helpers/charsetdecoder.h>
 
-namespace log4cxx
+// Instantiate template pointer types passed as parameters
+LOG4CXX_INSTANTIATE_EXPORTED_PTR(LOG4CXX_NS::helpers::InputStream);
+LOG4CXX_INSTANTIATE_EXPORTED_PTR(LOG4CXX_NS::helpers::CharsetDecoder);
+
+namespace LOG4CXX_NS
 {
 
 namespace helpers
@@ -36,8 +40,7 @@ namespace helpers
 class LOG4CXX_EXPORT InputStreamReader : public Reader
 {
 	private:
-		InputStreamPtr in;
-		CharsetDecoderPtr dec;
+		LOG4CXX_DECLARE_PRIVATE_MEMBER_PTR(InputStreamReaderPrivate, m_priv)
 
 	public:
 		DECLARE_ABSTRACT_LOG4CXX_OBJECT(InputStreamReader)
@@ -63,18 +66,17 @@ class LOG4CXX_EXPORT InputStreamReader : public Reader
 
 		~InputStreamReader();
 
+		using Reader::close;
 		/**
-		 * Closes the stream.
-		 *
-		 * @param p The memory pool associated with the reader.
+		 * Close the stream.
 		 */
-		virtual void close(Pool& p);
+		void close(  ) override;
 
+		using Reader::read;
 		/**
 		 * @return The complete stream contents as a LogString.
-		 * @param p The memory pool associated with the reader.
 		 */
-		virtual LogString read(Pool& p);
+		LogString read(  ) override;
 
 		/**
 		 * @return The name of the character encoding being used by this stream.

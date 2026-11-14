@@ -14,10 +14,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#if defined(_MSC_VER)
-	#pragma warning ( disable: 4231 4251 4275 4786 )
-#endif
-
 
 #define __STDC_CONSTANT_MACROS
 #include <log4cxx/logstring.h>
@@ -27,17 +23,18 @@
 #include <apr_time.h>
 #include <apr_pools.h>
 #include <apr_strings.h>
+#include <log4cxx/helpers/exception.h>
 #include <log4cxx/helpers/transcoder.h>
 #include <log4cxx/helpers/stringhelper.h>
 #include <log4cxx/helpers/pool.h>
 #include <log4cxx/logger.h>
 
-using namespace log4cxx;
-using namespace log4cxx::helpers;
+using namespace LOG4CXX_NS;
+using namespace LOG4CXX_NS::helpers;
 
 IMPLEMENT_LOG4CXX_OBJECT( TimeZone )
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 namespace helpers
 {
@@ -50,7 +47,7 @@ class GMTTimeZone : public TimeZone
 		/** Class factory. */
 		static const TimeZonePtr& getInstance()
 		{
-			static TimeZonePtr tz( new GMTTimeZone() );
+			static WideLife<TimeZonePtr> tz = std::make_shared<GMTTimeZone>();
 			return tz;
 		}
 
@@ -75,7 +72,6 @@ class GMTTimeZone : public TimeZone
 			return stat;
 		}
 
-	private:
 		GMTTimeZone() : TimeZone( LOG4CXX_STR("GMT") )
 		{
 		}
@@ -90,7 +86,7 @@ class LocalTimeZone : public TimeZone
 		/** Class factory. */
 		static const TimeZonePtr& getInstance()
 		{
-			static TimeZonePtr tz( new LocalTimeZone() );
+			static WideLife<TimeZonePtr> tz = std::make_shared<LocalTimeZone>();
 			return tz;
 		}
 
@@ -116,11 +112,11 @@ class LocalTimeZone : public TimeZone
 		}
 
 
-	private:
 		LocalTimeZone() : TimeZone( getTimeZoneName() )
 		{
 		}
 
+	private:
 		static const LogString getTimeZoneName()
 		{
 			const int MAX_TZ_LENGTH = 255;
@@ -137,7 +133,7 @@ class LocalTimeZone : public TimeZone
 
 			tzName[tzLength] = 0;
 			LogString retval;
-			log4cxx::helpers::Transcoder::decode(tzName, retval);
+			LOG4CXX_NS::helpers::Transcoder::decode(tzName, retval);
 			return retval;
 		}
 
@@ -195,12 +191,12 @@ TimeZone::~TimeZone()
 
 const TimeZonePtr& TimeZone::getDefault()
 {
-	return log4cxx::helpers::TimeZoneImpl::LocalTimeZone::getInstance();
+	return LOG4CXX_NS::helpers::TimeZoneImpl::LocalTimeZone::getInstance();
 }
 
 const TimeZonePtr& TimeZone::getGMT()
 {
-	return log4cxx::helpers::TimeZoneImpl::GMTTimeZone::getInstance();
+	return LOG4CXX_NS::helpers::TimeZoneImpl::GMTTimeZone::getInstance();
 }
 
 const TimeZonePtr TimeZone::getTimeZone( const LogString& id )
@@ -209,7 +205,7 @@ const TimeZonePtr TimeZone::getTimeZone( const LogString& id )
 
 	if ( id == gmt )
 	{
-		return log4cxx::helpers::TimeZoneImpl::GMTTimeZone::getInstance();
+		return LOG4CXX_NS::helpers::TimeZoneImpl::GMTTimeZone::getInstance();
 	}
 
 	if ( id.length() >= 5 && id.substr( 0, 3 ) == gmt )
@@ -245,10 +241,19 @@ const TimeZonePtr TimeZone::getTimeZone( const LogString& id )
 			hours = StringHelper::toInt(off);
 		}
 
+		// Make sure that our offset can't be crazy
+		if( hours < -12 || 14 < hours)
+		{
+			throw RuntimeException(LOG4CXX_STR("Hour offset must be in (-12..14)"));
+		}
+		if (minutes < 0 || 60 < minutes)
+		{
+			throw RuntimeException(LOG4CXX_STR("Minute offset must be in (0..60)"));
+		}
+
 		LogString s(gmt);
-		Pool p;
 		LogString hh;
-		StringHelper::toString(hours, p, hh);
+		StringHelper::toString(hours, hh);
 
 		if (sign > 0)
 		{
@@ -267,7 +272,7 @@ const TimeZonePtr TimeZone::getTimeZone( const LogString& id )
 		s.append(hh);
 		s.append(1, (logchar) 0x3A /*' :' */);
 		LogString mm;
-		StringHelper::toString(minutes, p, mm);
+		StringHelper::toString(minutes, mm);
 
 		if (mm.length() == 1)
 		{
@@ -276,7 +281,7 @@ const TimeZonePtr TimeZone::getTimeZone( const LogString& id )
 
 		s.append(mm);
 		apr_int32_t offset = sign * (hours * 3600 + minutes * 60);
-		return TimeZonePtr(new log4cxx::helpers::TimeZoneImpl::FixedTimeZone( s, offset ));
+		return std::make_shared<helpers::TimeZoneImpl::FixedTimeZone>( s, offset );
 	}
 
 	const TimeZonePtr& ltz = getDefault();

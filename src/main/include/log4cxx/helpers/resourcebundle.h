@@ -20,7 +20,7 @@
 
 #include <log4cxx/helpers/object.h>
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 namespace helpers
 {
@@ -81,7 +81,8 @@ class LOG4CXX_EXPORT ResourceBundle : public Object
 		The parent bundle is searched by #getString when this bundle does
 		not contain a particular resource.
 		*/
-		ResourceBundlePtr parent;
+		LOG4CXX_DECLARE_PRIVATE_MEMBER(ResourceBundlePtr, parent)
+
 }; // class ResourceBundle
 }  // namespace helpers
 } // namespace log4cxx

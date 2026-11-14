@@ -22,32 +22,48 @@
 #include <log4cxx/helpers/bytebuffer.h>
 #include <log4cxx/helpers/stringhelper.h>
 
-using namespace log4cxx;
-using namespace log4cxx::helpers;
+using namespace LOG4CXX_NS;
+using namespace LOG4CXX_NS::helpers;
 
 IMPLEMENT_LOG4CXX_OBJECT(OutputStreamWriter)
 
-OutputStreamWriter::OutputStreamWriter(OutputStreamPtr& out1)
-	: out(out1), enc(CharsetEncoder::getDefaultEncoder())
+struct OutputStreamWriter::OutputStreamWriterPrivate
 {
-	if (out1 == 0)
+	OutputStreamWriterPrivate
+		( const OutputStreamPtr& out1
+		, const CharsetEncoderPtr& enc1 = CharsetEncoder::getDefaultEncoder()
+		)
+		: out(out1)
+		, enc(enc1)
+		{}
+
+	OutputStreamPtr out;
+	CharsetEncoderPtr enc;
+};
+
+OutputStreamWriter::OutputStreamWriter(const OutputStreamPtr& out)
+	: m_priv(std::make_unique<OutputStreamWriterPrivate>(out))
+{
+	if (!out)
 	{
-		throw NullPointerException(LOG4CXX_STR("out parameter may not be null."));
+		throw NullPointerException(LOG4CXX_STR("OutputStream parameter"));
 	}
 }
 
-OutputStreamWriter::OutputStreamWriter(OutputStreamPtr& out1,
-	CharsetEncoderPtr& enc1)
-	: out(out1), enc(enc1)
+OutputStreamWriter::OutputStreamWriter
+	( const OutputStreamPtr& out
+	, const CharsetEncoderPtr& enc
+	)
+	: m_priv(std::make_unique<OutputStreamWriterPrivate>(out, enc))
 {
-	if (out1 == 0)
+	if (!out)
 	{
-		throw NullPointerException(LOG4CXX_STR("out parameter may not be null."));
+		throw NullPointerException(LOG4CXX_STR("OutputStream parameter"));
 	}
 
-	if (enc1 == 0)
+	if (!enc)
 	{
-		throw NullPointerException(LOG4CXX_STR("enc parameter may not be null."));
+		throw NullPointerException(LOG4CXX_STR("CharsetEncoder parameter"));
 	}
 }
 
@@ -55,47 +71,60 @@ OutputStreamWriter::~OutputStreamWriter()
 {
 }
 
-void OutputStreamWriter::close(Pool& p)
+void OutputStreamWriter::close(  )
 {
-	out->close(p);
+	m_priv->out->close();
 }
 
-void OutputStreamWriter::flush(Pool& p)
+void OutputStreamWriter::flush(  )
 {
-	out->flush(p);
+	m_priv->out->flush();
 }
 
-void OutputStreamWriter::write(const LogString& str, Pool& p)
+void OutputStreamWriter::write( const LogString& str )
 {
-	if (str.length() > 0)
+	if (str.empty())
+		return;
+	if (CharsetEncoder::isTriviallyCopyable(str, m_priv->enc))
 	{
-#ifdef LOG4CXX_MULTI_PROCESS
-		size_t bufSize = str.length() * 2;
-		char* rawbuf = new char[bufSize];
-		ByteBuffer buf(rawbuf, (size_t) bufSize);
-#else
+		ByteBuffer buf((char*)str.data(), str.size() * sizeof (logchar));
+		m_priv->out->write(buf);
+	}
+	else
+	{
 		enum { BUFSIZE = 1024 };
-		char rawbuf[BUFSIZE];
-		ByteBuffer buf(rawbuf, (size_t) BUFSIZE);
+		char stackData[BUFSIZE];
+		char* rawbuf = stackData;
+		size_t bufSize = BUFSIZE;
+#ifdef LOG4CXX_MULTI_PROCESS
+		std::vector<char> heapData;
+		// Ensure the logging event is a single write system call to keep events from each process separate
+		if (bufSize < str.length() * 2)
+		{
+			heapData.resize(bufSize = str.length() * 2);
+			rawbuf = heapData.data();
+		}
 #endif
-		enc->reset();
+		ByteBuffer buf(rawbuf, bufSize);
+		m_priv->enc->reset();
 		LogString::const_iterator iter = str.begin();
 
 		while (iter != str.end())
 		{
-			CharsetEncoder::encode(enc, str, iter, buf);
+			CharsetEncoder::encode(m_priv->enc, str, iter, buf);
 			buf.flip();
-			out->write(buf, p);
+			m_priv->out->write(buf);
 			buf.clear();
 		}
 
-		CharsetEncoder::encode(enc, str, iter, buf);
-		enc->flush(buf);
+		CharsetEncoder::encode(m_priv->enc, str, iter, buf);
 		buf.flip();
-		out->write(buf, p);
-#ifdef LOG4CXX_MULTI_PROCESS
-		delete []rawbuf;
-#endif
+		m_priv->out->write(buf);
 	}
+}
+
+OutputStreamPtr OutputStreamWriter::getOutputStreamPtr() const
+{
+	return m_priv->out;
 }
 

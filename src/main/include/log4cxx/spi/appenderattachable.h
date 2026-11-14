@@ -18,18 +18,16 @@
 #ifndef _LOG4CXX_SPI_APPENDER_ATTACHABLE_H_
 #define _LOG4CXX_SPI_APPENDER_ATTACHABLE_H_
 
-#if defined(_MSC_VER)
-	#pragma warning ( push )
-	#pragma warning ( disable: 4231 4251 4275 4786 )
-#endif
-
 #include <log4cxx/logstring.h>
-#include <vector>
 #include <log4cxx/helpers/object.h>
-#include <log4cxx/appender.h>
+#include <vector>
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
+class Appender;
+LOG4CXX_PTR_DEF(Appender);
+LOG4CXX_LIST_DEF(AppenderList, AppenderPtr);
+
 namespace spi
 {
 /**
@@ -44,7 +42,7 @@ class LOG4CXX_EXPORT AppenderAttachable : public virtual helpers::Object
 		/**
 		 * Add an appender.
 		 */
-		virtual void addAppender(const AppenderPtr newAppender) = 0;
+		virtual void addAppender(const AppenderPtr& newAppender) = 0;
 
 		/**
 		 * Get all previously added appenders as an AppenderList.
@@ -60,7 +58,7 @@ class LOG4CXX_EXPORT AppenderAttachable : public virtual helpers::Object
 		 * Returns <code>true</code> if the specified appender is in list of
 		 * attached appenders, <code>false</code> otherwise.
 		 */
-		virtual bool isAttached(const AppenderPtr appender) const = 0;
+		virtual bool isAttached(const AppenderPtr& appender) const = 0;
 
 		/**
 		 * Remove all previously added appenders.
@@ -68,15 +66,27 @@ class LOG4CXX_EXPORT AppenderAttachable : public virtual helpers::Object
 		virtual void removeAllAppenders() = 0;
 
 		/**
-		 * Remove the appender passed as parameter from the list of appenders.
+		 * Remove \c appender from the list of appenders.
+		 * @returns true if successful.
 		 */
-		virtual void removeAppender(const AppenderPtr appender) = 0;
+		virtual bool removeAppender(const AppenderPtr& appender) = 0;
 
 		/**
-		 * Remove the appender with the name passed as parameter from the
-		 * list of appenders.
+		 * Remove the \c name appender from the list of appenders.
+		 * @returns true if successful.
 		 */
-		virtual void removeAppender(const LogString& name) = 0;
+		virtual bool removeAppender(const LogString& name) = 0;
+
+		/**
+		 * Replace \c oldAppender  with \c newAppender.
+		 * @return true if oldAppender was replaced with newAppender.
+		 */
+		virtual bool replaceAppender(const AppenderPtr& oldAppender, const AppenderPtr& newAppender) = 0;
+
+		/**
+		 * Replace any previously added appenders with \c newList.
+		 */
+		virtual void replaceAppenders(const AppenderList& newList) = 0;
 
 		// Dtor
 		virtual ~AppenderAttachable() {}
@@ -85,9 +95,5 @@ class LOG4CXX_EXPORT AppenderAttachable : public virtual helpers::Object
 LOG4CXX_PTR_DEF(AppenderAttachable);
 }
 }
-
-#if defined(_MSC_VER)
-	#pragma warning ( pop )
-#endif
 
 #endif //_LOG4CXX_SPI_APPENDER_ATTACHABLE_H_

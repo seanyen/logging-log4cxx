@@ -25,19 +25,39 @@
 #include <log4cxx/helpers/stringhelper.h>
 #include <log4cxx/helpers/transcoder.h>
 #include <log4cxx/ndc.h>
+#include <log4cxx/private/layout_priv.h>
 
 
-using namespace log4cxx;
-using namespace log4cxx::helpers;
-using namespace log4cxx::spi;
-using namespace log4cxx::xml;
+using namespace LOG4CXX_NS;
+using namespace LOG4CXX_NS::helpers;
+using namespace LOG4CXX_NS::spi;
+using namespace LOG4CXX_NS::xml;
+
+struct XMLLayout::XMLLayoutPrivate
+{
+	XMLLayoutPrivate()
+		: locationInfo(false)
+		, properties(false)
+		, expectedPatternLength(100)
+		{}
+
+	// Print no location info by default
+	bool locationInfo; //= false
+	bool properties; // = false
+
+	// Expected length of a formatted event excluding the message text
+	size_t expectedPatternLength;
+};
 
 IMPLEMENT_LOG4CXX_OBJECT(XMLLayout)
 
 XMLLayout::XMLLayout()
-	: locationInfo(false), properties(false)
+	: m_priv(std::make_unique<XMLLayoutPrivate>())
 {
+	m_priv->expectedPatternLength = priv::doubledLayoutSize(getFormattedEventCharacterCount());
 }
+
+XMLLayout::~XMLLayout() {}
 
 void XMLLayout::setOption(const LogString& option,
 	const LogString& value)
@@ -45,33 +65,37 @@ void XMLLayout::setOption(const LogString& option,
 	if (StringHelper::equalsIgnoreCase(option, LOG4CXX_STR("LOCATIONINFO"), LOG4CXX_STR("locationinfo")))
 	{
 		setLocationInfo(OptionConverter::toBoolean(value, false));
+		m_priv->expectedPatternLength = priv::doubledLayoutSize(getFormattedEventCharacterCount());
 	}
 
 	if (StringHelper::equalsIgnoreCase(option, LOG4CXX_STR("PROPERTIES"), LOG4CXX_STR("properties")))
 	{
 		setProperties(OptionConverter::toBoolean(value, false));
+		m_priv->expectedPatternLength = priv::doubledLayoutSize(getFormattedEventCharacterCount());
 	}
+	else
+		Layout::setOption(option, value);
 }
 
-void XMLLayout::format(LogString& output,
-	const spi::LoggingEventPtr& event,
-	Pool& p) const
+void XMLLayout::format( LogString& output, const spi::LoggingEventPtr& event ) const
 {
+	auto& lsMsg = event->getRenderedMessage();
+	priv::reserveFormattedEvent(output, m_priv->expectedPatternLength, lsMsg.size());
 	output.append(LOG4CXX_STR("<log4j:event logger=\""));
-	Transform::appendEscapingTags(output, event->getLoggerName());
+	Transform::appendLegalCharacters(output, event->getLoggerName());
 	output.append(LOG4CXX_STR("\" timestamp=\""));
-	StringHelper::toString(event->getTimeStamp() / 1000L, p, output);
+	StringHelper::toString(event->getTimeStamp() / 1000L, output);
 	output.append(LOG4CXX_STR("\" level=\""));
-	Transform::appendEscapingTags(output, event->getLevel()->toString());
+	Transform::appendLegalCharacters(output, event->getLevel()->toString());
 	output.append(LOG4CXX_STR("\" thread=\""));
-	Transform::appendEscapingTags(output, event->getThreadName());
+	Transform::appendLegalCharacters(output, event->getThreadName());
 	output.append(LOG4CXX_STR("\">"));
 	output.append(LOG4CXX_EOL);
 
 	output.append(LOG4CXX_STR("<log4j:message><![CDATA["));
 	// Append the rendered message. Also make sure to escape any
 	// existing CDATA sections.
-	Transform::appendEscapingCDATA(output, event->getRenderedMessage());
+	Transform::appendEscapingCDATA(output, lsMsg);
 	output.append(LOG4CXX_STR("]]></log4j:message>"));
 	output.append(LOG4CXX_EOL);
 
@@ -85,25 +109,25 @@ void XMLLayout::format(LogString& output,
 		output.append(LOG4CXX_EOL);
 	}
 
-	if (locationInfo)
+	if (m_priv->locationInfo)
 	{
 		output.append(LOG4CXX_STR("<log4j:locationInfo class=\""));
 		const LocationInfo& locInfo = event->getLocationInformation();
 		LOG4CXX_DECODE_CHAR(className, locInfo.getClassName());
-		Transform::appendEscapingTags(output, className);
+		Transform::appendLegalCharacters(output, className);
 		output.append(LOG4CXX_STR("\" method=\""));
 		LOG4CXX_DECODE_CHAR(method, locInfo.getMethodName());
-		Transform::appendEscapingTags(output, method);
+		Transform::appendLegalCharacters(output, method);
 		output.append(LOG4CXX_STR("\" file=\""));
 		LOG4CXX_DECODE_CHAR(fileName, locInfo.getFileName());
-		Transform::appendEscapingTags(output, fileName);
+		Transform::appendLegalCharacters(output, fileName);
 		output.append(LOG4CXX_STR("\" line=\""));
-		StringHelper::toString(locInfo.getLineNumber(), p, output);
+		StringHelper::toString(locInfo.getLineNumber(), output);
 		output.append(LOG4CXX_STR("\"/>"));
 		output.append(LOG4CXX_EOL);
 	}
 
-	if (properties)
+	if (m_priv->properties)
 	{
 		LoggingEvent::KeySet propertySet(event->getPropertyKeySet());
 		LoggingEvent::KeySet keySet(event->getMDCKeySet());
@@ -113,37 +137,31 @@ void XMLLayout::format(LogString& output,
 			output.append(LOG4CXX_STR("<log4j:properties>"));
 			output.append(LOG4CXX_EOL);
 
-			for (LoggingEvent::KeySet::const_iterator i = keySet.begin();
-				i != keySet.end();
-				i++)
+			for (auto key : keySet)
 			{
-				LogString key(*i);
 				LogString value;
 
 				if (event->getMDC(key, value))
 				{
 					output.append(LOG4CXX_STR("<log4j:data name=\""));
-					Transform::appendEscapingTags(output, key);
+					Transform::appendLegalCharacters(output, key);
 					output.append(LOG4CXX_STR("\" value=\""));
-					Transform::appendEscapingTags(output, value);
+					Transform::appendLegalCharacters(output, value);
 					output.append(LOG4CXX_STR("\"/>"));
 					output.append(LOG4CXX_EOL);
 				}
 			}
 
-			for (LoggingEvent::KeySet::const_iterator i2 = propertySet.begin();
-				i2 != propertySet.end();
-				i2++)
+			for (auto key : propertySet)
 			{
-				LogString key(*i2);
 				LogString value;
 
 				if (event->getProperty(key, value))
 				{
 					output.append(LOG4CXX_STR("<log4j:data name=\""));
-					Transform::appendEscapingTags(output, key);
+					Transform::appendLegalCharacters(output, key);
 					output.append(LOG4CXX_STR("\" value=\""));
-					Transform::appendEscapingTags(output, value);
+					Transform::appendLegalCharacters(output, value);
 					output.append(LOG4CXX_STR("\"/>"));
 					output.append(LOG4CXX_EOL);
 				}
@@ -159,3 +177,22 @@ void XMLLayout::format(LogString& output,
 	output.append(LOG4CXX_EOL);
 }
 
+void XMLLayout::setLocationInfo(bool locationInfo1)
+{
+	m_priv->locationInfo = locationInfo1;
+}
+
+bool XMLLayout::getLocationInfo() const
+{
+	return m_priv->locationInfo;
+}
+
+void XMLLayout::setProperties(bool flag)
+{
+	m_priv->properties = flag;
+}
+
+bool XMLLayout::getProperties()
+{
+	return m_priv->properties;
+}

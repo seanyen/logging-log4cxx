@@ -49,66 +49,87 @@ public:
 
 	void tearDown()
 	{
-		log4cxx::spi::LoggerRepositoryPtr rep = logger->getLoggerRepository().lock();
-		if (rep) {
+		auto rep = logger->getLoggerRepository();
+
+		if (rep)
+		{
 			rep->resetConfiguration();
 		}
 	}
 
 	void test1()
 	{
-		PropertyConfigurator::configure(LOG4CXX_FILE("input/hierarchyThreshold1.properties"));
+		auto status = PropertyConfigurator::configure(LOG4CXX_FILE("input/hierarchyThreshold1.properties"));
+		LOGUNIT_ASSERT_EQUAL(status, spi::ConfigurationStatus::Configured);
 		common();
-		LOGUNIT_ASSERT(Compare::compare(TEMP, LOG4CXX_FILE("witness/hierarchyThreshold.1")));
+		LOGUNIT_ASSERT(compareAllowingMissingEmpty(TEMP, LOG4CXX_FILE("witness/hierarchyThreshold.1")));
 	}
 
 	void test2()
 	{
-		PropertyConfigurator::configure(LOG4CXX_FILE("input/hierarchyThreshold2.properties"));
+		auto status = PropertyConfigurator::configure(LOG4CXX_FILE("input/hierarchyThreshold2.properties"));
+		LOGUNIT_ASSERT_EQUAL(status, spi::ConfigurationStatus::Configured);
 		common();
-		LOGUNIT_ASSERT(Compare::compare(TEMP, LOG4CXX_FILE("witness/hierarchyThreshold.2")));
+		LOGUNIT_ASSERT(compareAllowingMissingEmpty(TEMP, LOG4CXX_FILE("witness/hierarchyThreshold.2")));
 	}
 
 	void test3()
 	{
-		PropertyConfigurator::configure(LOG4CXX_FILE("input/hierarchyThreshold3.properties"));
+		auto status = PropertyConfigurator::configure(LOG4CXX_FILE("input/hierarchyThreshold3.properties"));
+		LOGUNIT_ASSERT_EQUAL(status, spi::ConfigurationStatus::Configured);
 		common();
-		LOGUNIT_ASSERT(Compare::compare(TEMP, LOG4CXX_FILE("witness/hierarchyThreshold.3")));
+		LOGUNIT_ASSERT(compareAllowingMissingEmpty(TEMP, LOG4CXX_FILE("witness/hierarchyThreshold.3")));
 	}
 
 	void test4()
 	{
-		PropertyConfigurator::configure(LOG4CXX_FILE("input/hierarchyThreshold4.properties"));
+		auto status = PropertyConfigurator::configure(LOG4CXX_FILE("input/hierarchyThreshold4.properties"));
+		LOGUNIT_ASSERT_EQUAL(status, spi::ConfigurationStatus::Configured);
 		common();
-		LOGUNIT_ASSERT(Compare::compare(TEMP, LOG4CXX_FILE("witness/hierarchyThreshold.4")));
+		LOGUNIT_ASSERT(compareAllowingMissingEmpty(TEMP, LOG4CXX_FILE("witness/hierarchyThreshold.4")));
 	}
 
 	void test5()
 	{
-		PropertyConfigurator::configure(LOG4CXX_FILE("input/hierarchyThreshold5.properties"));
+		auto status = PropertyConfigurator::configure(LOG4CXX_FILE("input/hierarchyThreshold5.properties"));
+		LOGUNIT_ASSERT_EQUAL(status, spi::ConfigurationStatus::Configured);
 		common();
-		LOGUNIT_ASSERT(Compare::compare(TEMP, LOG4CXX_FILE("witness/hierarchyThreshold.5")));
+		LOGUNIT_ASSERT(compareAllowingMissingEmpty(TEMP, LOG4CXX_FILE("witness/hierarchyThreshold.5")));
 	}
 
 	void test6()
 	{
-		PropertyConfigurator::configure(LOG4CXX_FILE("input/hierarchyThreshold6.properties"));
+		auto status = PropertyConfigurator::configure(LOG4CXX_FILE("input/hierarchyThreshold6.properties"));
+		LOGUNIT_ASSERT_EQUAL(status, spi::ConfigurationStatus::Configured);
 		common();
-		LOGUNIT_ASSERT(Compare::compare(TEMP, LOG4CXX_FILE("witness/hierarchyThreshold.6")));
+		LOGUNIT_ASSERT(compareAllowingMissingEmpty(TEMP, LOG4CXX_FILE("witness/hierarchyThreshold.6")));
 	}
 
 	void test7()
 	{
-		PropertyConfigurator::configure(LOG4CXX_FILE("input/hierarchyThreshold7.properties"));
+		auto status = PropertyConfigurator::configure(LOG4CXX_FILE("input/hierarchyThreshold7.properties"));
+		LOGUNIT_ASSERT_EQUAL(status, spi::ConfigurationStatus::Configured);
 		common();
-		LOGUNIT_ASSERT(Compare::compare(TEMP, LOG4CXX_FILE("witness/hierarchyThreshold.7")));
+		LOGUNIT_ASSERT(compareAllowingMissingEmpty(TEMP, LOG4CXX_FILE("witness/hierarchyThreshold.7")));
 	}
 
 	void test8()
 	{
-		PropertyConfigurator::configure(LOG4CXX_FILE("input/hierarchyThreshold8.properties"));
+		auto status = PropertyConfigurator::configure(LOG4CXX_FILE("input/hierarchyThreshold8.properties"));
+		LOGUNIT_ASSERT_EQUAL(status, spi::ConfigurationStatus::Configured);
 		common();
-		LOGUNIT_ASSERT(Compare::compare(TEMP, LOG4CXX_FILE("witness/hierarchyThreshold.8")));
+		LOGUNIT_ASSERT(compareAllowingMissingEmpty(TEMP, LOG4CXX_FILE("witness/hierarchyThreshold.8")));
+	}
+
+	// File creation is lazy, so a threshold that filters out every message leaves no file at all.
+	static bool compareAllowingMissingEmpty(const File& actual, const File& witness)
+	{
+		if (!actual.exists())
+		{
+			return witness.length() == 0;
+		}
+
+		return Compare::compare(actual, witness);
 	}
 
 	static void common()
@@ -126,7 +147,7 @@ private:
 	static LoggerPtr logger;
 };
 
-File HierarchyThresholdTestCase::TEMP(LOG4CXX_FILE("output/temp"));
+File HierarchyThresholdTestCase::TEMP(LOG4CXX_FILE("output/hierarchythreshold"));
 
 LoggerPtr HierarchyThresholdTestCase::logger =
 	Logger::getLogger(LOG4CXX_TEST_STR("HierarchyThresholdTestCase"));

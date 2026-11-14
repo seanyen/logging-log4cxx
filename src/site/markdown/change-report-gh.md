@@ -1,4 +1,4 @@
-Changelog {#changelog}
+Change Log {#changelog}
 ===
 <!--
  Note: License header cannot be first, as doxygen does not generate
@@ -21,34 +21,496 @@ Changelog {#changelog}
  limitations under the License.
 -->
 
-# Release History
+## Release History {#history}
 
-| Version                                                                                | Date       | Description          |
-| -------------------------------------------------------------------------------------- | ---------- | -------------------- |
-| [0.12.1](#0.12.1) | 2021-??-?? | Bugfix for 0.12.0 |
-| [0.12.0](#0.12.0) | 2021-05-01 | First release to require C++11. Updates for smart pointers.  Standardization on CMake for building. |
-| [0.11.0](#0.11.0) | 2020-08-09 | Maintenance release. |
-| [0.10.0](#0.10.0) | 2008-04-03 | First Apache release |
-| [0.9.7](#0.9.7)   | 2004-05-10 |                      |
-| [0.9.6](#0.9.6)   | 2004-04-11 |                      |
-| [0.9.5](#0.9.5)   | 2004-02-04 |                      |
-| [0.9.4](#0.9.4)   | 2003-10-25 |                      |
-| [0.9.3](#0.9.3)   | 2003-09-19 |                      |
-| [0.9.2](#0.9.2)   | 2003-08-10 |                      |
-| [0.9.1](#0.9.1)   | 2003-08-06 |                      |
-| [0.9.0](#0.9.0)   | 2003-08-06 |                      |
-| [0.1.1](#0.1.1)   | 2003-07-09 |                      |
-| [0.1.0](#0.1.0)   | 2003-07-08 |                      |
-| [0.0.1](#0.0.1)   | 2003-05-31 |                      |
+| Version             | Date       | Description          |
+| ------------------- | ---------- | -------------------- |
+| [2.0.0](#rel_2_0_0) | 2026-XX-XX | ABI altering release |
+| [1.8.0](#rel_1_8_0) | 2026-07-29 | Maintenance release  |
+| [1.7.0](#rel_1_7_0) | 2026-04-04 | Maintenance release  |
+| [1.6.1](#rel_1_6_1) | 2026-01-09 | Bugfix release       |
+| [1.6.0](#rel_1_6_0) | 2025-12-14 | Maintenance release  |
+| [1.5.0](#rel_1_5_0) | 2025-08-03 | Maintenance release  |
+| [1.4.0](#rel_1_4_0) | 2025-03-01 | Maintenance release  |
+| [1.3.1](#rel_1_3_1) | 2024-11-30 | Bugfix release       |
+| [1.3.0](#rel_1_3_0) | 2024-10-21 | Maintenance release  |
+| [1.2.0](#rel_1_2_0) | 2024-01-01 | Maintenance release  |
+| [1.1.0](#rel_1_1_0) | 2023-05-01 | General bugfix release  |
+| [1.0.0](#rel_1_0_0) | 2023-01-01 | Major release to standardize the library and make it ABI stable  |
+| [0.13.0](#rel_13_0) | 2022-04-15 | Maintenance release  |
+| [0.12.1](#rel_12_1) | 2021-09-21 | Bugfix for 0.12.0 |
+| [0.12.0](#rel_12_0) | 2021-05-01 | First release to require C++11. Updates for smart pointers.  Standardization on CMake for building. |
+| [0.11.0](#rel_11_0) | 2020-08-09 | Maintenance release. |
+| [0.10.0](#rel_10_0) | 2008-04-03 | First Apache release |
+| [0.9.7](#rel_9_7)   | 2004-05-10 |                      |
+| [0.9.6](#rel_9_6)   | 2004-04-11 |                      |
+| [0.9.5](#rel_9_5)   | 2004-02-04 |                      |
+| [0.9.4](#rel_9_4)   | 2003-10-25 |                      |
+| [0.9.3](#rel_9_3)   | 2003-09-19 |                      |
+| [0.9.2](#rel_9_2)   | 2003-08-10 |                      |
+| [0.9.1](#rel_9_1)   | 2003-08-06 |                      |
+| [0.9.0](#rel_9_0)   | 2003-08-06 |                      |
+| [0.1.1](#rel_1_1)   | 2003-07-09 |                      |
+| [0.1.0](#rel_1_0)   | 2003-07-08 |                      |
+| [0.0.1](#rel_0_1)   | 2003-05-31 |                      |
 
-<a name="0.12.0"/>
-## Release 0.12.1 - 2021-??-??
+
+## Release 2.0.0 - 2026-XX-XX {#rel_2_0_0}
+
+This major release includes the following alterations to the application binary interface (ABI).
+
+* The <code>helpers::Pool</code> parameter is not longer required in virtual functions.
+User-defined subclasses of [Appender](@ref log4cxx::Appender), [Filter](@ref log4cxx::spi::Filter) or [Layout](@ref log4cxx::Layout) may require modification.
+
+* The <code>helpers::Pool</code> parameter has been removed from [File](@ref log4cxx::File) member function argument lists.
+Code that uses log4cxx::File may require modification.
+
+* The <code>LOG4CXX_CHAR=unichar</code> CMake option is no longer supported.
+Support remains for <code>LOG4CXX_CHAR=wchar_t</code> for applications using std::wstring.
+
+* The [ErrorHandler::error](@ref log4cxx::spi::ErrorHandler::error) method signatures have changed.
+User-defined subclasses of [spi::ErrorHandler](@ref log4cxx::spi::ErrorHandler) will require modification.
+
+* The [spi::Configurator::isValid](@ref log4cxx::spi::Configurator::isValid) method must be implemented in subclasses.
+User-defined subclasses of [spi::Configurator](@ref log4cxx::spi::Configurator) will need to implement this new method.
+
+Release 2.0.0 includes the following new features:
+
+* [Filters](@ref log4cxx::spi::Filter) can be added to an appender in a [properties file](@ref log4cxx::PropertyConfigurator)
+   \[[#195](https://github.com/apache/logging-log4cxx/issues/195)\]
+
+* A [SocketAppender](@ref log4cxx::net::JSONSocketAppender) that sends JSON format messages.
+   \[[#823](https://github.com/apache/logging-log4cxx/pull/823)\]
+
+* A new [FileAppender](@ref log4cxx::FileAppender::setOption) option to delay log file creation until an event is added.
+   \[[#775](https://github.com/apache/logging-log4cxx/pull/775)\]
+
+* A new [FileWatchdog::startWatching](@ref log4cxx::helpers::FileWatchdog::startWatching) method to create a periodic task without a needing to sub-class.
+   \[[#769](https://github.com/apache/logging-log4cxx/pull/769)\]
+
+* An incorrect configuration option name generates a warning in the [Log4cxx internal debugging](internal-debugging.html) output
+   \[[#738](https://github.com/apache/logging-log4cxx/pull/738)\]
+
+* Improved [SMTPAppender](@ref log4cxx::net::SMTPAppender) diagnostic messages in the [Log4cxx internal debugging](internal-debugging.html) output
+   \[[#735](https://github.com/apache/logging-log4cxx/pull/735)\]
+
+* [SMTP](@ref log4cxx::net::SMTPAppender::setOption) and [Telnet](@ref log4cxx::net::TelnetAppender::setOption) appenders use secure-by-default configurations
+   \[[#734](https://github.com/apache/logging-log4cxx/pull/734)\]
+
+* The encoder returned by [CharsetEncoder::getUTF8Encoder](@ref log4cxx::helpers::CharsetEncoder::getUTF8Encoder)
+inserts the Unicode replacement character (0xFFFD) to indicate an invalid codepoint
+   \[[#730](https://github.com/apache/logging-log4cxx/pull/730)\]
+
+The following issues have been addressed:
+
+* A performance regression with [JSON](@ref log4cxx::JSONLayout) & [XML](@ref log4cxx::xml::XMLLayout) output
+   \[[#757](https://github.com/apache/logging-log4cxx/pull/757)\]
+
+* Using [default configuration](@ref log4cxx::DefaultConfigurator::configure),
+[BufferedIO](@ref log4cxx::FileAppender::setBufferedIO) and
+[a watchdog](@ref log4cxx::helpers::FileWatchdog) caused recursive configuration
+   \[[#739](https://github.com/apache/logging-log4cxx/pull/739)\]
+
+* Using [BufferedIO](@ref log4cxx::FileAppender::setBufferedIO)
+in multiple [FileAppenders](@ref log4cxx::FileAppender) with the same name could cause a fault
+   \[[#733](https://github.com/apache/logging-log4cxx/pull/733)\]
+
+* A seg-fault when a user-defined class inherited from a non-abstract base class
+   * [#629](https://github.com/apache/logging-log4cxx/pull/629)
+   , [#637](https://github.com/apache/logging-log4cxx/pull/637)
+
+The other Log4cxx behaviour changes are:
+
+* Use <code>find_package(log4cxx COMPONENTS qt)</code> instead of <code>find_package(log4cxx-qt)</code> to access Log4cxx Qt support
+  \[[#600](https://github.com/apache/logging-log4cxx/pull/600)\]
+
+* In Msys2, the Windows native thread number is displayed instead of the [pthread_self](https://man7.org/linux/man-pages/man3/pthread_self.3.html) value.
+  \[[#783](https://github.com/apache/logging-log4cxx/pull/783)\]
+
+* Default configuration does not check the <code>log4j.configuration</code> and <code>log4j.configuratorClass</code> environment variables.
+Instead, use <code>LOG4CXX_CONFIGURATION</code> and <code>LOG4CXX_CONFIGURATOR_CLASS</code>.
+  \[[#784](https://github.com/apache/logging-log4cxx/pull/784)\]
+
+* Threads created by Log4cxx are assigned a name.
+Call [ThreadUtility::configure](@ref log4cxx::helpers::ThreadUtility::configure) to alter this behaviour.
+  \[[#785](https://github.com/apache/logging-log4cxx/pull/785)\]
+
+## Release 1.8.0 - 2026-07-29 {#rel_1_8_0}
+
+Release 1.8.0 includes the following new features:
+
+* Functions that aid the transition to the next ABI version
+   * [#625](https://github.com/apache/logging-log4cxx/pull/625)
+   , [#634](https://github.com/apache/logging-log4cxx/pull/634)
+   , [#642](https://github.com/apache/logging-log4cxx/pull/642)
+   , [#645](https://github.com/apache/logging-log4cxx/pull/645)
+   , [#669](https://github.com/apache/logging-log4cxx/pull/669)
+
+The following issues have been addressed:
+
+* Various character encoding/decoding issues
+   * [#589](https://github.com/apache/logging-log4cxx/pull/589)
+   , [#659](https://github.com/apache/logging-log4cxx/pull/659)
+   , [#660](https://github.com/apache/logging-log4cxx/pull/660)
+   , [#664](https://github.com/apache/logging-log4cxx/pull/664)
+   , [#669](https://github.com/apache/logging-log4cxx/pull/669)
+   , [#670](https://github.com/apache/logging-log4cxx/pull/670)
+   , [#711](https://github.com/apache/logging-log4cxx/pull/711)
+
+* A lack of robustness dealing with values near numeric limits  
+   * [#633](https://github.com/apache/logging-log4cxx/pull/633)
+   , [#646](https://github.com/apache/logging-log4cxx/pull/646)
+   , [#649](https://github.com/apache/logging-log4cxx/pull/649)
+   , [#650](https://github.com/apache/logging-log4cxx/pull/650)
+   , [#651](https://github.com/apache/logging-log4cxx/pull/651)
+   , [#654](https://github.com/apache/logging-log4cxx/pull/654)
+   , [#655](https://github.com/apache/logging-log4cxx/pull/655)
+   , [#656](https://github.com/apache/logging-log4cxx/pull/656)
+   , [#657](https://github.com/apache/logging-log4cxx/pull/657)
+   , [#660](https://github.com/apache/logging-log4cxx/pull/660)
+
+* Console appender truncated a message containing an embedded null character
+   \[[#643](https://github.com/apache/logging-log4cxx/pull/643)\]
+
+* RollingFileAppender could name the rolled file ".1"
+   \[[#697](https://github.com/apache/logging-log4cxx/issues/697)\]
+
+* {fmt} library version 11 and 12 incompatibility
+   \[[#700](https://github.com/apache/logging-log4cxx/issues/700)\]
+
+## Release 1.7.0 - 2026-04-04 {#rel_1_7_0}
+
+Release 1.7.0 includes the following new features:
+
+* Support for a 'fallback-ref' attribute in the 'appender-ref' element of a configuration file (see \ref fallback-ref-example)
+   \[[#606](https://github.com/apache/logging-log4cxx/pull/606)\]
+
+* Qt support can be enabled using a Log4cxx CMake find_package component (see \ref MyApp-qt/CMakeLists.txt)
+   \[[#600](https://github.com/apache/logging-log4cxx/pull/600)\]
+
+* A TelnetAppender option (NonBlocking) to close the connection when the network buffer is full
+   \[[#591](https://github.com/apache/logging-log4cxx/pull/591)\]
+
+The following issues have been addressed:
+
+* Non-ascii characters incorrectly encoded in JSON output
+   \[[#615](https://github.com/apache/logging-log4cxx/pull/615)\]
+
+* XML output could contain characters not allowed by the XML 1.0 specification
+   * [#609](https://github.com/apache/logging-log4cxx/pull/609)
+   , [#610](https://github.com/apache/logging-log4cxx/pull/610)
+
+* An XML configuration file with recursive references caused program termination
+   \[[#605](https://github.com/apache/logging-log4cxx/pull/605)\]
+
+* Possible undefined behavior during a configuration change
+   \[[#601](https://github.com/apache/logging-log4cxx/pull/601)\]
+
+* Message loss when the calculation of a logged value also logs
+   \[[#594](https://github.com/apache/logging-log4cxx/pull/594)\]
+
+* ODBCAppender prepared statement value buffers had incorrect lifetimes
+   \[[#581](https://github.com/apache/logging-log4cxx/pull/581)\]
+
+
+## Release 1.6.1 - 2026-01-09 {#rel_1_6_1}
+
+This is a minor bugfix release to fix issues found with 1.6.0.
+
+### Bug {#rel_1_6_1_bugs}
+
+* A Qt fatal type log message was not flushed when using buffered/async output
+   \[[#571](https://github.com/apache/logging-log4cxx/pull/571)\]
+
+* The currently executing program file path components could not be used in a properties configuration file
+   \[[#572](https://github.com/apache/logging-log4cxx/pull/572)\]
+
+
+## Release 1.6.0 - 2025-12-14 {#rel_1_6_0}
+
+Release 1.6.0 includes the following new features:
+
+* Configuration ${varname} values can be set programatically prior to loading a configuration file (see \ref com/foo/config4.cpp)
+   \[[#520](https://github.com/apache/logging-log4cxx/pull/520)\]
+* The current executable's file name and its components are available for use in a configuration file
+and the LOG4CXX_CONFIGURATION environment variable (see log4cxx::spi::Configurator::properties).
+   \[[#520](https://github.com/apache/logging-log4cxx/pull/520)\]
+* Console output (Log4cxx internal logging and BasicConfigurator) use a color per message level by default
+   \[[#529](https://github.com/apache/logging-log4cxx/pull/529)\]
+* New logging macros that defer binary-to-text conversion until used in AsyncAppender's background thread
+   * [#548](https://github.com/apache/logging-log4cxx/pull/548)
+   , [#554](https://github.com/apache/logging-log4cxx/pull/554)
+* A simplified way to attach an AsyncAppender to a logger using a configuration file
+   \[[#550](https://github.com/apache/logging-log4cxx/pull/550)\]
+
+The following issues have been addressed:
+
+* Prevent abnormal termination when recursively defining a configuration file variable
+   \[[#565](https://github.com/apache/logging-log4cxx/pull/565)\]
+
+
+## Release 1.5.0 - 2025-08-03 {#rel_1_5_0}
+
+Release 1.5.0 includes the following new features:
+
+* Qt6 can be used when building with LOG4CXX_QT_SUPPORT=on
+   \[[#488](https://github.com/apache/logging-log4cxx/pull/488)\]
+* TelnetAppender can now deliver messages when the socket is in a TIME_WAIT state
+   \[[#495](https://github.com/apache/logging-log4cxx/pull/495)\]
+* TelnetAppender can be restricted to specific network
+   \[[#498](https://github.com/apache/logging-log4cxx/pull/498)\]
+
+The following issues have been addressed:
+
+* HTML output was illformed when the logger name, title or thread name contained the special HTML characters
+   * [#509](https://github.com/apache/logging-log4cxx/pull/509)
+   , [#513](https://github.com/apache/logging-log4cxx/pull/513)
+   , [#514](https://github.com/apache/logging-log4cxx/pull/514)
+* JSON output was illformed when a message contained certain control characters
+   \[[#512](https://github.com/apache/logging-log4cxx/pull/512)\]
+* Undefined behaviour when reloading a configuration file after calling LogManager::shutdown
+   \[[#504](https://github.com/apache/logging-log4cxx/pull/504)\]
+* Compilation error when using gcc on MacOS
+   \[[#499](https://github.com/apache/logging-log4cxx/pull/499)\]
+* It was possible for logging events to be lost when reloading a configuration file
+   \[[#491](https://github.com/apache/logging-log4cxx/pull/491)\]
+
+## Release 1.4.0 - 2025-03-01 {#rel_1_4_0}
+
+Release 1.4.0 includes the following new features:
+
+* Buffered file output is now periodically flushed by a background thread
+   \[[#445](https://github.com/apache/logging-log4cxx/pull/445)\]
+
+The following issues have been addressed:
+
+* The MultiprocessRollingFileAppender did not work
+   \[[#439](https://github.com/apache/logging-log4cxx/issues/439)\]
+* Boundary conditions not comprehensively checked when processing a configuration file
+   * [#470](https://github.com/apache/logging-log4cxx/pull/470)
+   , [#471](https://github.com/apache/logging-log4cxx/pull/471)
+   , [#472](https://github.com/apache/logging-log4cxx/pull/472)
+   , [#473](https://github.com/apache/logging-log4cxx/pull/473)
+   , [#475](https://github.com/apache/logging-log4cxx/pull/475)
+   , [#476](https://github.com/apache/logging-log4cxx/pull/476)
+   , [#477](https://github.com/apache/logging-log4cxx/pull/477)
+
+## Release 1.3.1 - 2024-11-30 {#rel_1_3_1}
+
+This is a minor bugfix release to fix issues found with 1.3.0.
+
+
+### Bug {#rel_1_3_1_bugs}
+
+* Properly prevent undefined behaviour when an appender is deleted without being closed
+   \[[#431](https://github.com/apache/logging-log4cxx/pull/431)\]
+* Prevent abnormal termination on exit when using a static NDC/MDC variable
+   \[[#426](https://github.com/apache/logging-log4cxx/pull/426)\]
+* Support for std::experimental::optional (in the standard library used by gcc 5.4)
+   \[[#419](https://github.com/apache/logging-log4cxx/pull/419)\]
+
+## Release 1.3.0 - 2024-10-21 {#rel_1_3_0}
+
+Release 1.3.0 includes the following new features:
+
+* Overhead reduction of upto 60% sending logging events to an appender
+* Statistics on the AsyncAppender's queue length (in Log4cxx debug output)
+* [Fuzz tests](@ref fuzzing) along with [Google OSS-Fuzz](https://github.com/google/oss-fuzz) integration
+
+The following issues have been addressed:
+
+* MSYS2/MINGW build errors \[[#389](https://github.com/apache/logging-log4cxx/pull/389)\]
+* `thread_local` problems in MSYS2/MINGW \[[#394](https://github.com/apache/logging-log4cxx/pull/394)\]
+* A potential 'use after free' fault when using AsyncAppender \[[#397](https://github.com/apache/logging-log4cxx/pull/397)\]
+
+## Release 1.2.0 - 2024-01-01 {#rel_1_2_0}
+
+The following issues have been addressed:
+
+* The `locale` external character encoding option reverting to US-ASCII \[[LOGCXX-483](https://issues.apache.org/jira/browse/LOGCXX-483)\]
+* A segfault during process exit when log4cxx::LogManager::shutdown is not called \[[#268](https://github.com/apache/logging-log4cxx/pull/268)\] \[[#219](https://github.com/apache/logging-log4cxx/pull/219)\]
+* The cmake option to include a MultiprocessRollingFileAppender did not work
+* Build failure in a MSYS2 environment
+* Format settings (e.g. std::hex) were retained across LOG4CXX_XXXXX macro logging requests
+* When the APR library was built without support for threads (APR_HAS_THREADS=0):
+    * the AsyncAppender and dynamically loaded configuration changes were not available
+    * a single nested/mapped diagnostic context (NDC/MDC) would be used and updated (without synchronization)
+* On Windows, GetThreadDescription() called for each logging event when the thread name was empty \[[#321](https://github.com/apache/logging-log4cxx/pull/321)\]
+
+Release 1.2.0 includes the following new features:
+
+* LOG4CXX_XXXX macros now support logging of QStrings directly
+* log4cxx::hexdump function that returns a string of hexadecimal byte values
+* Ability to remove a HierarchyEventListener \[[#233](https://github.com/apache/logging-log4cxx/issues/233)\]
+* Less string copying when sending a logging event to an appender
+* Less frequent mutex contention when logging from multiple threads concurrently \[[#320](https://github.com/apache/logging-log4cxx/pull/320)\]
+* Allow thread information to be included in JSON formatted output
+* Optional support for logging during process termination \[[#271](https://github.com/apache/logging-log4cxx/pull/271)\]
+* A cmake option to place Log4cxx functions in a different namespace \[[#277](https://github.com/apache/logging-log4cxx/pull/277)\]
+* Optionally use std::format in LOG4CXX_XXXX_FMT macros instead of fmt::format \[[#291](https://github.com/apache/logging-log4cxx/pull/291)\]
+* Support for per object enabling/disabling of logging requests (see log4cxx::LoggerInstancePtr)
+
+Note: the `LOG4CXX_CHARSET` cmake option (external character encoding) default value has changed to `utf-8`
+
+## Release 1.1.0 - 2023-05-01 {#rel_1_1_0}
+
+This is a general maintenance release.  The following bugs/issues have been fixed:
+
+* Fix [CVE-2023-31038](https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2023-31038)
+* Fix to build on Windows Server 2016
+* Fix compiling errors with older compilers
+* Make ODBC and SMTP opt-in instead of automatic
+* Parameterize statements for ODBC inserts.  Add new generic DBAppender class that uses APR for database support
+* Fix Qt support
+
+## Release 1.0.0 - 2023-01-01 {#rel_1_0_0}
+
+This is a major release that fixes a number of long-standing issues and is desinged
+to make Log4cxx ABI stable moving forward.  A few notes on this version:
+
+* Removed log4j style Java serialization.  Due to Java's inherent problems
+with serialization, and the fact that Chainsaw no longer supports it, it has
+been completely removed.
+* A number of obsolete classes have been removed
+	* Removal of TTCCLayout.  If you still want this layout, use a PatternLayout
+with a format similar to the following:
+`%%r [%%t] %-5p - %%m%%n`
+	* Removal of DateLayout.  Use PatternLayout instead.
+* Classes now use an internal private class to store member variables in order to
+make them ABI stable
+* Multiprocess support is available, but Log4cxx must be explicitly compiled with this option
+
+Full release notes are below:
+
+### Bug {#rel_1_0_0_bugs}
+
+
+-   \[[LOGCXX-432](https://issues.apache.org/jira/browse/LOGCXX-432)\] -
+    AsyncAppender automatically switches to sync mode when e.g. there is
+    no disk space available
+-   \[[LOGCXX-451](https://issues.apache.org/jira/browse/LOGCXX-451)\] -
+    Application hang up during exit on Windows
+-   \[[LOGCXX-491](https://issues.apache.org/jira/browse/LOGCXX-491)\] -
+    SizeBasedRollingTest cases fail when defining
+    LOG4CXX\_MULTI\_PROCESS
+-   \[[LOGCXX-563](https://issues.apache.org/jira/browse/LOGCXX-563)\] -
+    Fix memory leaks
+
+### New Feature {#rel_1_0_0_features}
+
+-   \[[LOGCXX-514](https://issues.apache.org/jira/browse/LOGCXX-514)\] -
+    Create a libfmt layout
+-   \[[LOGCXX-518](https://issues.apache.org/jira/browse/LOGCXX-518)\] -
+    Refactor the multi process code of RollingFileAppender
+-   \[[LOGCXX-559](https://issues.apache.org/jira/browse/LOGCXX-559)\] -
+    Implement LocationInfoFilter
+
+### Improvement {#rel_1_0_0_improvements}
+
+-   \[[LOGCXX-516](https://issues.apache.org/jira/browse/LOGCXX-516)\] -
+    Make classes ABI-stable
+-   \[[LOGCXX-524](https://issues.apache.org/jira/browse/LOGCXX-524)\] -
+    Remove silent exceptions
+-   \[[LOGCXX-527](https://issues.apache.org/jira/browse/LOGCXX-527)\] -
+    Mock the clock for tests
+-   \[[LOGCXX-542](https://issues.apache.org/jira/browse/LOGCXX-542)\] -
+    Remove log4j serialization
+-   \[[LOGCXX-549](https://issues.apache.org/jira/browse/LOGCXX-549)\] -
+    Make networking classes independent of implementation
+-   \[[LOGCXX-557](https://issues.apache.org/jira/browse/LOGCXX-557)\] -
+    Keep track of all appenders even if unused
+-   \[[LOGCXX-558](https://issues.apache.org/jira/browse/LOGCXX-558)\] -
+    Prevent MSVC compilation warnings \"needs to have dll-interface\"
+-   \[[LOGCXX-564](https://issues.apache.org/jira/browse/LOGCXX-564)\] -
+    Put typedefs into log4cxx namespace
+-   \[[LOGCXX-566](https://issues.apache.org/jira/browse/LOGCXX-566)\] -
+    Configurable output colors for log messages
+-   \[[LOGCXX-567](https://issues.apache.org/jira/browse/LOGCXX-567)\] -
+    Investigate backtrace support
+-   \[[LOGCXX-568](https://issues.apache.org/jira/browse/LOGCXX-568)\] -
+    Cleaunup files if rollover fails
+-   \[[LOGCXX-570](https://issues.apache.org/jira/browse/LOGCXX-570)\] -
+    Remove ObjectOutputStream
+-   \[[LOGCXX-571](https://issues.apache.org/jira/browse/LOGCXX-571)\] -
+    Better document \'runtime\' env vars and macros
+-   \[[LOGCXX-572](https://issues.apache.org/jira/browse/LOGCXX-572)\] -
+    Add support to re-read configuration files to Qt support
+-   \[[LOGCXX-573](https://issues.apache.org/jira/browse/LOGCXX-573)\] -
+    Provide feedback when configuring log4cxx
+-   \[[LOGCXX-574](https://issues.apache.org/jira/browse/LOGCXX-574)\] -
+    Provide a list of directories/filenames to try to configure
+
+
+## Release 0.13.0 - 2022-04-15 {#rel_13_0}
+
+This release fixes a number of issues.  Notable new features include the
+ability to block signals from threads that the library creates, automatic
+creation of log directories, new color patterns, and the ability to determine
+the library version at compile and run-time.
+
+### Bug {#rel_13_0_bugs}
+
+-   \[[LOGCXX-102](https://issues.apache.org/jira/browse/LOGCXX-102)\] -
+    PropertyConfigurator does not process the RollingFileAppender
+    options
+-   \[[LOGCXX-387](https://issues.apache.org/jira/browse/LOGCXX-387)\] -
+    SocketAppenderSkeleton re-connects only once
+-   \[[LOGCXX-431](https://issues.apache.org/jira/browse/LOGCXX-431)\] -
+    When log4cxx creates a thread, it doesn\'t block signals it\'s not
+    using, leading to unreliable signal delivery for the calling
+    process.
+-   \[[LOGCXX-519](https://issues.apache.org/jira/browse/LOGCXX-519)\] -
+    Version11 - \"INSTALL.TXT\" and \"vstudio.apt\" miss explenation for
+    generating the log4cxx.dll
+-   \[[LOGCXX-525](https://issues.apache.org/jira/browse/LOGCXX-525)\] -
+    Compressing log files does not create directories
+-   \[[LOGCXX-536](https://issues.apache.org/jira/browse/LOGCXX-536)\] -
+    CMakeLists.txt install pgkconfig and cmake modue to wrong place
+-   \[[LOGCXX-537](https://issues.apache.org/jira/browse/LOGCXX-537)\] -
+    double mutex lock
+-   \[[LOGCXX-540](https://issues.apache.org/jira/browse/LOGCXX-540)\] -
+    propertiestestcase.properties contains CRLF, does not well play with
+    git
+-   \[[LOGCXX-543](https://issues.apache.org/jira/browse/LOGCXX-543)\] -
+    Some tests can fail when there is a \"Q\" in the pathname
+-   \[[LOGCXX-546](https://issues.apache.org/jira/browse/LOGCXX-546)\] -
+    Multi threaded applications run at single threaded speed
+
+### New Feature {#rel_13_0_features}
+
+-   \[[LOGCXX-529](https://issues.apache.org/jira/browse/LOGCXX-529)\] -
+    Support color and highlight conversion patterns
+
+### Improvement {#rel_13_0_improvements}
+
+-   \[[LOGCXX-337](https://issues.apache.org/jira/browse/LOGCXX-337)\] -
+    Suggested fix for socketappender not reconnecting multiple times
+-   \[[LOGCXX-538](https://issues.apache.org/jira/browse/LOGCXX-538)\] -
+    Tests cannot be run in parallel
+-   \[[LOGCXX-539](https://issues.apache.org/jira/browse/LOGCXX-539)\] -
+    Allow distribustion log4j to be used for socketservertest
+-   \[[LOGCXX-547](https://issues.apache.org/jira/browse/LOGCXX-547)\] -
+    Allow for hiding of location data
+-   \[[LOGCXX-548](https://issues.apache.org/jira/browse/LOGCXX-548)\] -
+    Doxygen documentation is not reproducible
+-   \[[LOGCXX-550](https://issues.apache.org/jira/browse/LOGCXX-550)\] -
+    Add ability to get thread name not just ID
+
+### Wish {#rel_13_0_wish_list}
+
+-   \[[LOGCXX-544](https://issues.apache.org/jira/browse/LOGCXX-544)\] -
+    Please embedd library version in a header
+-   \[[LOGCXX-551](https://issues.apache.org/jira/browse/LOGCXX-551)\] -
+    CMake documented build option for Boost vs C++17 Implementation for
+    shared\_mutex
+
+
+## Release 0.12.1 - 2021-09-21 {#rel_12_1}
 
 This is a minor bugfix release to fix issues found with 0.12.0.  Notably, this version fixes a bug
 where a multithreaded application would crash when using a rolling file.
 
-Bug
----
+### Bug {#rel_12_1_bugs}
 
 -   \[[LOGCXX-534](https://issues.apache.org/jira/browse/LOGCXX-534)\] -
     Crashed in log->forcedLog function when running with multi-thread
@@ -56,8 +518,7 @@ Bug
     log4cxx fails to build on Centos 7.6 / g++ 4.8.5 / Boost 1.53
 
 
-<a name="0.12.0"/>
-## Release 0.12.0 - 2021-05-01
+## Release 0.12.0 - 2021-05-01 {#rel_12_0}
 
 This is the first release to require a minimum version of C++11.  This means that all objects in log4cxx
 are now created using `std::shared_ptr` as the smart pointer implementation.
@@ -85,8 +546,7 @@ AppenderPtr appender = log4cxx::cast<Appender>(instance);
 // both point at the same object.
 ```
 
-Bug
----
+### Bug {#rel_12_0_bugs}
 
 -   \[[LOGCXX-322](https://issues.apache.org/jira/browse/LOGCXX-322)\] -
     Crashes on exit from multithreaded program using log4cxx
@@ -107,20 +567,14 @@ Bug
 -   \[[LOGCXX-526](https://issues.apache.org/jira/browse/LOGCXX-526)\] -
     GCC-11.1.0 Support
 
-New Feature
------------
+### New Feature {#rel_12_0_features}
 
 -   \[[LOGCXX-515](https://issues.apache.org/jira/browse/LOGCXX-515)\] -
     Add macros to utilize libfmt formatting for messages
-
-Improvement
------------
-
 -   \[[LOGCXX-523](https://issues.apache.org/jira/browse/LOGCXX-523)\] -
     Add in error handling for rollover errors
 
-<a name="0.11.0"/>
-### Release 0.11.0 - 2020-08-09
+## Release 0.11.0 - 2020-08-09 {#rel_11_0}
 
 |                                                                     |                                                                                                                                                                                                                                                 |    |
 | ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -- |
@@ -180,7 +634,7 @@ Improvement
 | ![](images/fix.gif "fix")    | Please make sure that the LOG4CXX\_\* macro's can be used as ordinary statements. Fixes [LOGCXX-319](https://issues.apache.org/jira/browse/LOGCXX-319).                                                                                         |    |
 | ![](images/fix.gif "fix")    | Log4cxx triggers locking inversion which can result in a deadlock. Fixes [LOGCXX-317](https://issues.apache.org/jira/browse/LOGCXX-317).                                                                                                        |    |
 | ![](images/fix.gif "fix")    | Build process fails in case of absence of iconv support in apr-util Fixes [LOGCXX-313](https://issues.apache.org/jira/browse/LOGCXX-313).                                                                                                       |    |
-| ![](images/fix.gif "fix")    | Property/DOMConfigurator::configureAndWatch can continue to run after APR termination Fixes [LOGCXX-305](https://issues.apache.org/jira/browse/LOGCXX-305).                                                                                     |    |
+| ![](images/fix.gif "fix")    | Property/xml::DOMConfigurator::configureAndWatch can continue to run after APR termination Fixes [LOGCXX-305](https://issues.apache.org/jira/browse/LOGCXX-305).                                                                                     |    |
 | ![](images/fix.gif "fix")    | BasicConfigurator::configure results in writer not set warning. Fixes [LOGCXX-304](https://issues.apache.org/jira/browse/LOGCXX-304).                                                                                                           |    |
 | ![](images/fix.gif "fix")    | DOMConfigurator does not set ErrorHandler. Fixes [LOGCXX-303](https://issues.apache.org/jira/browse/LOGCXX-303).                                                                                                                                |    |
 | ![](images/fix.gif "fix")    | ODBCAppender connection settings broken (or just have changed). Fixes [LOGCXX-300](https://issues.apache.org/jira/browse/LOGCXX-300).                                                                                                           |    |
@@ -220,8 +674,7 @@ Improvement
 | ![](images/update.gif "update") | Documented C (class) and M (method) log format keywords.                                                                                                                                                                                        |    |
 | ![](images/add.gif "add")    | LocationInfo for Borland C++ Builder and successors improved.                                                                                                                                                                                   |    |
 
-<a name="0.10.0"/>
-### Release 0.10.0 - 2008-04-03
+## Release 0.10.0 - 2008-04-03 {#rel_10_0}
 
 |                                                                     |                                                                                                                                                                                                |    |
 | ------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -- |
@@ -249,8 +702,8 @@ Improvement
 | ![](images/update.gif "update") | Drop src/performance Fixes [LOGCXX-232](https://issues.apache.org/jira/browse/LOGCXX-232).                                                                                                     |    |
 | ![](images/fix.gif "fix")    | Deadlock in AsyncAppender Fixes [LOGCXX-231](https://issues.apache.org/jira/browse/LOGCXX-231).                                                                                                |    |
 | ![](images/update.gif "update") | Align ant build options with automake Fixes [LOGCXX-230](https://issues.apache.org/jira/browse/LOGCXX-230).                                                                                    |    |
-| ![](images/update.gif "update") | Remove @author tags Fixes [LOGCXX-228](https://issues.apache.org/jira/browse/LOGCXX-228).                                                                                                      |    |
-| ![](images/update.gif "update") | Remove @since tags Fixes [LOGCXX-227](https://issues.apache.org/jira/browse/LOGCXX-227).                                                                                                       |    |
+| ![](images/update.gif "update") | Remove \@author tags Fixes [LOGCXX-228](https://issues.apache.org/jira/browse/LOGCXX-228).                                                                                                      |    |
+| ![](images/update.gif "update") | Remove \@since tags Fixes [LOGCXX-227](https://issues.apache.org/jira/browse/LOGCXX-227).                                                                                                       |    |
 | ![](images/update.gif "update") | Default configurator uses \*.properties in preference to \*.xml Fixes [LOGCXX-226](https://issues.apache.org/jira/browse/LOGCXX-226).                                                          |    |
 | ![](images/update.gif "update") | Migrate unit tests from LGPL'd CPPUNIT to an ASL'd testing framework Fixes [LOGCXX-225](https://issues.apache.org/jira/browse/LOGCXX-225).                                                     |    |
 | ![](images/fix.gif "fix")    | trunk compile error. Fixes [LOGCXX-222](https://issues.apache.org/jira/browse/LOGCXX-222).                                                                                                     |    |
@@ -306,9 +759,9 @@ Improvement
 | ![](images/fix.gif "fix")    | helpers/object.h: DECLARE\_LOG4CXX\_OBJECT macro definition is missing virtual destructor declaration Fixes [LOGCXX-160](https://issues.apache.org/jira/browse/LOGCXX-160).                    |    |
 | ![](images/fix.gif "fix")    | Initialization of local static objects out of order on Linux Fixes [LOGCXX-159](https://issues.apache.org/jira/browse/LOGCXX-159).                                                             |    |
 | ![](images/fix.gif "fix")    | tolower not defined in stringhelper.cpp Fixes [LOGCXX-158](https://issues.apache.org/jira/browse/LOGCXX-158).                                                                                  |    |
-| ![](images/fix.gif "fix")    | make install fails since @manual\_dest@ replacement is missing in Makefiles Fixes [LOGCXX-157](https://issues.apache.org/jira/browse/LOGCXX-157).                                              |    |
-| ![](images/update.gif "update") | immediate flush in console appender Fixes [LOGCXX-156](https://issues.apache.org/jira/browse/LOGCXX-156).                                                                                      |    |
-| ![](images/update.gif "update") | Update source headers per new ASF header policy Fixes [LOGCXX-155](https://issues.apache.org/jira/browse/LOGCXX-155).                                                                          |    |
+| ![](images/fix.gif "fix")    | make install fails since \@manual_dest@ replacement is missing in Makefiles Fixes [LOGCXX-157](https://issues.apache.org/jira/browse/LOGCXX-157).                                              |    |
+| ![](images/update.gif "update") | immediate flush in console appender Fixes [LOGCXX-156](https://issues.apache.org/jira/browse/LOGCXX-156).                                                                                   |    |
+| ![](images/update.gif "update") | Update source headers per new ASF header policy Fixes [LOGCXX-155](https://issues.apache.org/jira/browse/LOGCXX-155).                                                                       |    |
 | ![](images/add.gif "add")    | Automate log4cxx site and doxygen generation and deployment Fixes [LOGCXX-153](https://issues.apache.org/jira/browse/LOGCXX-153).                                                              |    |
 | ![](images/fix.gif "fix")    | gcc warning about cast from \`const void\*' to \`log4cxx::helpers::Object\*' discards qualifiers from pointer target typ Fixes [LOGCXX-152](https://issues.apache.org/jira/browse/LOGCXX-152). |    |
 | ![](images/fix.gif "fix")    | Umlauts as literal in patternlayout won't be logged correct Fixes [LOGCXX-151](https://issues.apache.org/jira/browse/LOGCXX-151).                                                              |    |
@@ -431,8 +884,7 @@ Improvement
 | ![](images/fix.gif "fix")    | Missing \#else Fixes [LOGCXX-3](https://issues.apache.org/jira/browse/LOGCXX-3).                                                                                                               |    |
 | ![](images/fix.gif "fix")    | logger.h includes config.h Fixes [LOGCXX-2](https://issues.apache.org/jira/browse/LOGCXX-2).                                                                                                   |    |
 
-<a name="0.9.7"/>
-### Release 0.9.7 - 2004-05-10
+## Release 0.9.7 - 2004-05-10 {#rel_9_7}
 
 |                                                                  |                                                                                                                                                     |    |
 | ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | -- |
@@ -447,8 +899,7 @@ Improvement
 | ![](images/fix.gif "fix") | Logging macros can be used without explicity declaring the use of log4cxx namespace.                                                                |    |
 | ![](images/fix.gif "fix") | Fixed static library unresolved externals for msvc 6 and 7.1                                                                                        |    |
 
-<a name="0.9.6"/>
-### Release 0.9.6 - 2004-04-11
+## Release 0.9.6 - 2004-04-11 {#rel_9_6}
 
 |                                                                     |                                                                                                         |    |
 | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- | -- |
@@ -462,8 +913,7 @@ Improvement
 | ![](images/add.gif "add")    | Added TimeZone configuration to PatternLayout (bug 912563)                                              |    |
 | ![](images/add.gif "add")    | Support of the DailyRollingFileAppender (feature request 842765)                                        |    |
 
-<a name="0.9.5"/>
-### Release 0.9.5 - 2004-02-04
+## Release 0.9.5 - 2004-02-04 {#rel_9_5}
 
 |                                                                  |                                                                                                                            |    |
 | ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | -- |
@@ -483,8 +933,7 @@ Improvement
 | ![](images/fix.gif "fix") | Fixed compilations problems with unicode.                                                                                  |    |
 | ![](images/fix.gif "fix") | Fixed SocketAppender bug concerning MDC and NDC.                                                                           |    |
 
-<a name="0.9.4"/>
-### Release 0.9.4 - 2003-10-25
+## Release 0.9.4 - 2003-10-25 {#rel_9_4}
 
 |                                                                     |                                                           |    |
 | ------------------------------------------------------------------- | --------------------------------------------------------- | -- |
@@ -495,8 +944,7 @@ Improvement
 | ![](images/fix.gif "fix")    | Fixed threading configuration problems (bug 809125)       |    |
 | ![](images/fix.gif "fix")    | Fixed miscellaneous MSVC and cygwin compilation problems. |    |
 
-<a name="0.9.3"/>
-### Release 0.9.3 - 2003-09-19
+## Release 0.9.3 - 2003-09-19 {#rel_9_3}
 
 |                                                                     |                                                                                 |    |
 | ------------------------------------------------------------------- | ------------------------------------------------------------------------------- | -- |
@@ -511,8 +959,7 @@ Improvement
 | ![](images/add.gif "add")    | Added new tests                                                                 |    |
 | ![](images/add.gif "add")    | Added benchmarks                                                                |    |
 
-<a name="0.9.2"/>
-### Release 0.9.2 - 2003-08-10
+## Release 0.9.2 - 2003-08-10 {#rel_9_2}
 
 |                                                                     |                                                                               |    |
 | ------------------------------------------------------------------- | ----------------------------------------------------------------------------- | -- |
@@ -522,8 +969,7 @@ Improvement
 | ![](images/add.gif "add")    | Long events (\> 1024 chars) are now supported in the class XMLSocketAppender. |    |
 | ![](images/update.gif "update") | Carriage returns have been normalized in the class XMLLayout.                 |    |
 
-<a name="0.9.1"/>
-### Release 0.9.1 - 2003-08-06
+## Release 0.9.1 - 2003-08-06 {#rel_9_1}
 
 |                                                                     |                                                              |    |
 | ------------------------------------------------------------------- | ------------------------------------------------------------ | -- |
@@ -533,8 +979,7 @@ Improvement
 | ![](images/add.gif "add")    | Added MSVC 6.0 static libraty project.                       |    |
 | ![](images/update.gif "update") | Default configuration for the SMTP options is "no".          |    |
 
-<a name="0.9.0"/>
-### Release 0.9.0 - 2003-08-06
+## Release 0.9.0 - 2003-08-06 {#rel_9_0}
 
 |                                                                  |                                                                        |    |
 | ---------------------------------------------------------------- | ---------------------------------------------------------------------- | -- |
@@ -549,8 +994,7 @@ Improvement
 | ![](images/add.gif "add") | Added MSVC 6.0 'Unicode Debug' and 'Unicode Release' targets           |    |
 | ![](images/add.gif "add") | Added Java like System class.                                          |    |
 
-<a name="0.1.1"/>
-### Release 0.1.1 - 2003-07-09
+## Release 0.1.1 - 2003-07-09 {#rel_1_1}
 
 |                                                                  |                                                                     |    |
 | ---------------------------------------------------------------- | ------------------------------------------------------------------- | -- |
@@ -558,8 +1002,7 @@ Improvement
 | ![](images/fix.gif "fix") | Fixed MSVC 6.0 compilation problems concerning the 'Release' target |    |
 | ![](images/add.gif "add") | Added MSVC 6.0 tests projects                                       |    |
 
-<a name="0.1.0"/>
-### Release 0.1.0 - 2003-07-08
+## Release 0.1.0 - 2003-07-08 {#rel_1_0}
 
 |                                                                  |                                                                                                                                                            |    |
 | ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | -- |
@@ -575,8 +1018,7 @@ Improvement
 | ![](images/add.gif "add") | Port of the "Map Diagnostic Context" (MDC) class                                                                                                           |    |
 | ![](images/add.gif "add") | Added 13 tests (try make check)                                                                                                                            |    |
 
-<a name="0.0.1"/>
-### Release 0.0.1 - 2003-05-31
+## Release 0.0.1 - 2003-05-31 {#rel_0_1}
 
 |                                                                  |                                                                                                                                                      |    |
 | ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | -- |

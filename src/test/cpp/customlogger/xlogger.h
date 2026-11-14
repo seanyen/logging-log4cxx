@@ -20,7 +20,7 @@
 #include <log4cxx/spi/loggerfactory.h>
 
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 namespace spi
 {
@@ -31,9 +31,8 @@ class LocationInfo;
 }
 // Any sub-class of Logger must also have its own implementation of
 // LoggerFactory.
-class XFactory :
-	public virtual spi::LoggerFactory,
-	public virtual helpers::Object
+class XFactory
+	: public spi::LoggerFactory
 {
 	public:
 		DECLARE_ABSTRACT_LOG4CXX_OBJECT(XFactory)
@@ -43,9 +42,8 @@ class XFactory :
 		END_LOG4CXX_CAST_MAP()
 
 		XFactory();
-		virtual LoggerPtr makeNewLoggerInstance(
-			log4cxx::helpers::Pool& pool,
-			const LogString& name) const;
+
+		LoggerPtr makeNewLoggerInstance(const LogString& name) const override;
 };
 
 typedef std::shared_ptr<XFactory> XFactoryPtr;
@@ -72,8 +70,7 @@ class XLogger : public Logger
 		/**
 		        Just calls the parent constuctor.
 		*/
-		XLogger(log4cxx::helpers::Pool& pool,
-			const LogString& name1) : Logger(pool, name1) {}
+		XLogger(const LogString& name) : Logger(name) {}
 
 		/**
 		        Nothing to activate.

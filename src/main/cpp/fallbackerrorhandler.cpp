@@ -15,92 +15,152 @@
  * limitations under the License.
  */
 
-#include <log4cxx/logstring.h>
-#include <log4cxx/appender.h>
-#include <log4cxx/logger.h>
 #include <log4cxx/varia/fallbackerrorhandler.h>
 #include <log4cxx/helpers/loglog.h>
 #include <log4cxx/helpers/stringhelper.h>
-#include <log4cxx/spi/loggingevent.h>
+#include <log4cxx/hierarchy.h>
+#include <log4cxx/logmanager.h>
+#include <list>
 
-using namespace log4cxx;
-using namespace log4cxx::helpers;
-using namespace log4cxx::spi;
-using namespace log4cxx::varia;
+using namespace LOG4CXX_NS;
+using namespace LOG4CXX_NS::helpers;
+using namespace LOG4CXX_NS::varia;
 
 IMPLEMENT_LOG4CXX_OBJECT(FallbackErrorHandler)
 
-FallbackErrorHandler::FallbackErrorHandler()
-	: backup(), primary(), loggers()
+struct FallbackErrorHandler::FallbackErrorHandlerPrivate
 {
+	std::list<AppenderPtr> backup;
+	AppenderWeakPtr primary;
+	std::map<LogString, spi::AppenderAttachableWeakPtr> appenderHolders;
+	bool errorReported = false;
+};
+
+FallbackErrorHandler::FallbackErrorHandler()
+	: m_priv(std::make_unique<FallbackErrorHandlerPrivate>())
+{
+}
+
+FallbackErrorHandler::~FallbackErrorHandler() {}
+
+void FallbackErrorHandler::addAppenderHolder(const LogString& name, const spi::AppenderAttachablePtr& clx)
+{
+	if (LogLog::isDebugEnabled())
+	{
+		LogLog::debug(((LogString) LOG4CXX_STR("FB: Adding appender holder ["))
+			+ name + LOG4CXX_STR("]."));
+	}
+	m_priv->appenderHolders.emplace(name, clx);
 }
 
 void FallbackErrorHandler::setLogger(const LoggerPtr& logger)
 {
-	LogLog::debug(((LogString) LOG4CXX_STR("FB: Adding logger ["))
-		+ logger->getName() + LOG4CXX_STR("]."));
-	loggers.push_back(logger);
+	if (LogLog::isDebugEnabled())
+	{
+		LogLog::debug(((LogString) LOG4CXX_STR("FB: Adding logger ["))
+			+ logger->getName() + LOG4CXX_STR("]."));
+	}
+	m_priv->appenderHolders.emplace(logger->getName(), logger);
 }
 
-void FallbackErrorHandler::error(const LogString& message,
-	const std::exception& e,
-	int errorCode) const
+void FallbackErrorHandler::error(const LogString& message, spi::ErrorCode category)
 {
-	error(message, e, errorCode, 0);
+	if (LogLog::isDebugEnabled() && spi::ErrorCode::GENERIC_FAILURE != category)
+	{
+		LogString msg{ LOG4CXX_STR("FB: error category ") };
+		StringHelper::toString(category, msg);
+		LogLog::debug(msg);
+	}
+	LogLog::warn(message);
+	m_priv->errorReported = true;
 }
 
-void FallbackErrorHandler::error(const LogString& message,
-	const std::exception& e,
-	int, const spi::LoggingEventPtr&) const
+void FallbackErrorHandler::error
+	( const LogString&      message
+	, const std::exception& ex
+	, spi::ErrorCode        category
+	)
 {
-	LogLog::debug(((LogString) LOG4CXX_STR("FB: The following error reported: "))
-		+  message, e);
-	LogLog::debug(LOG4CXX_STR("FB: INITIATING FALLBACK PROCEDURE."));
+	error(message, ex, category, {});
+}
 
-	AppenderPtr primaryLocked = primary.lock();
-	AppenderPtr backupLocked = backup.lock();
+void FallbackErrorHandler::error
+	( const LogString&            message
+	, const std::exception&       ex
+	, spi::ErrorCode              category
+	, const spi::LoggingEventPtr& event
+	)
+{
+	if (LogLog::isDebugEnabled() && spi::ErrorCode::GENERIC_FAILURE != category)
+	{
+		LogString msg{ LOG4CXX_STR("FB: error category ") };
+		StringHelper::toString(category, msg);
+		LogLog::debug(msg);
+	}
+	LogLog::warn(message, ex);
+
+	AppenderPtr primaryLocked = m_priv->primary.lock();
+	AppenderPtr backupLocked;
+	if (!m_priv->backup.empty())
+	{
+		backupLocked = m_priv->backup.front();
+		m_priv->backup.pop_front();
+	}
 
 	if ( !primaryLocked || !backupLocked )
 	{
 		return;
 	}
 
-	for (LoggerPtr l : loggers)
+	for (auto& item : m_priv->appenderHolders)
 	{
-		LogLog::debug(((LogString) LOG4CXX_STR("FB: Searching for ["))
-			+ primaryLocked->getName() + LOG4CXX_STR("] in logger [")
-			+ l->getName() + LOG4CXX_STR("]."));
-		LogLog::debug(((LogString) LOG4CXX_STR("FB: Replacing ["))
-			+ primaryLocked->getName() + LOG4CXX_STR("] by [")
-			+ backupLocked->getName() + LOG4CXX_STR("] in logger [")
-			+ l->getName() + LOG4CXX_STR("]."));
-		l->removeAppender(primaryLocked);
-		LogLog::debug(((LogString) LOG4CXX_STR("FB: Adding appender ["))
-			+ backupLocked->getName() + LOG4CXX_STR("] to logger ")
-			+ l->getName());
-		l->addAppender(backupLocked);
+		auto holderLocked = item.second.lock();
+		if (!holderLocked)
+			continue;
+		if (LogLog::isDebugEnabled())
+		{
+			LogLog::debug(LOG4CXX_STR("FB: Replacing [")
+				+ primaryLocked->getName() + LOG4CXX_STR("] with [")
+				+ backupLocked->getName() + LOG4CXX_STR("] in [")
+				+ item.first + LOG4CXX_STR("]."));
+		}
+		if (!holderLocked->replaceAppender(primaryLocked, backupLocked))
+		{
+			LogLog::debug(LOG4CXX_STR("FB: Failed to replace [")
+				+ primaryLocked->getName() + LOG4CXX_STR("] with [")
+				+ backupLocked->getName() + LOG4CXX_STR("] in [")
+				+ item.first + LOG4CXX_STR("]."));
+		}
 	}
+	m_priv->errorReported = true;
+	if (event)
+    {
+		backupLocked->doAppend(event);
+    }
+	m_priv->primary = backupLocked;
 }
 
 void FallbackErrorHandler::setAppender(const AppenderPtr& primary1)
 {
-	LogLog::debug(((LogString) LOG4CXX_STR("FB: Setting primary appender to ["))
-		+ primary1->getName() + LOG4CXX_STR("]."));
-	this->primary = primary1;
+	if (LogLog::isDebugEnabled())
+	{
+		LogLog::debug(((LogString) LOG4CXX_STR("FB: Setting primary appender to ["))
+			+ primary1->getName() + LOG4CXX_STR("]."));
+	}
+	m_priv->primary = primary1;
 }
 
 void FallbackErrorHandler::setBackupAppender(const AppenderPtr& backup1)
 {
-	LogLog::debug(((LogString) LOG4CXX_STR("FB: Setting backup appender to ["))
-		+ backup1->getName() + LOG4CXX_STR("]."));
-	this->backup = backup1;
+	if (LogLog::isDebugEnabled())
+	{
+		LogLog::debug(((LogString) LOG4CXX_STR("FB: Setting backup appender to ["))
+			+ backup1->getName() + LOG4CXX_STR("]."));
+	}
+	m_priv->backup.push_back(backup1);
 }
 
-void FallbackErrorHandler::activateOptions(Pool&)
+bool FallbackErrorHandler::errorReported() const
 {
+	return m_priv->errorReported;
 }
-
-void FallbackErrorHandler::setOption(const LogString&, const LogString&)
-{
-}
-

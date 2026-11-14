@@ -19,18 +19,16 @@
 
 #include <log4cxx/spi/filter.h>
 
-#if defined(_MSC_VER)
-	#pragma warning ( push )
-	#pragma warning ( disable: 4251 )
-#endif
-
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 namespace filter
 {
 
 /**
- * A Filter that operates on a Map and can be used like in the following example:
+ * A Filter that operates on the current thread's MDC map.
+
+ For example, to exclude entries from the log where the context
+ has "user.name" set to "test2" and "user.ip" is "127.0.0.1":
  * <pre>
  * &lt;filter class="MapFilter"&gt;
  *     &lt;param name="user.ip"       value="127.0.0.1" /&gt;
@@ -40,68 +38,54 @@ namespace filter
  * &lt;/filter&gt;
  * </pre>
  */
-class LOG4CXX_EXPORT MapFilter: public log4cxx::spi::Filter
+class LOG4CXX_EXPORT MapFilter: public LOG4CXX_NS::spi::Filter
 {
 		typedef std::map < LogString, LogString > KeyVals;
 
 	private:
-		bool    acceptOnMatch;
-		bool    mustMatchAll; // true = AND; false = OR
-		KeyVals keyVals;
+		struct MapFilterPrivate;
 
 	public:
 		DECLARE_LOG4CXX_OBJECT(MapFilter)
 		BEGIN_LOG4CXX_CAST_MAP()
 		LOG4CXX_CAST_ENTRY(MapFilter)
-		LOG4CXX_CAST_ENTRY_CHAIN(log4cxx::spi::Filter)
+		LOG4CXX_CAST_ENTRY_CHAIN(LOG4CXX_NS::spi::Filter)
 		END_LOG4CXX_CAST_MAP()
 
 		MapFilter();
+		~MapFilter();
 
 		/**
-		Set options
+		\copybrief spi::OptionHandler::setOption()
+
+		Supported options | Supported values | Default value |
+		-------------- | ---------------- | --------------- |
+		Operator | (\ref andOrOne "1") | Or |
+		AcceptOnMatch | True,False | True |
+		{anyKey} | {anyValue} | - |
+
+		\anchor andOrOne (1) If "And", the MDC must contain all configured key-value pairs,
+		otherwise only one configured key-value pair needs to match. 
 		*/
-		virtual void setOption(const LogString& option,
-			const LogString& value);
+		void setOption(const LogString& option, const LogString& value) override;
 
-		inline void setKeyValue(const LogString& strKey, const LogString& strValue)
-		{
-			this->keyVals[strKey] = strValue;
-		}
+		void setKeyValue(const LogString& strKey, const LogString& strValue);
 
-		inline const LogString& getValue(const LogString& strKey) const
-		{
-			static  const LogString                 empty;
-			const KeyVals::const_iterator   it(this->keyVals.find(strKey));
+		const LogString& getValue(const LogString& strKey) const;
 
-			return (it != keyVals.end() ? it->second : empty);
-		}
+		void setAcceptOnMatch(bool acceptOnMatch1);
 
-		inline void setAcceptOnMatch(bool acceptOnMatch1)
-		{
-			this->acceptOnMatch = acceptOnMatch1;
-		}
+		bool getAcceptOnMatch() const;
 
-		inline bool getAcceptOnMatch() const
-		{
-			return acceptOnMatch;
-		}
+		bool getMustMatchAll() const;
 
-		inline bool getMustMatchAll() const
-		{
-			return mustMatchAll;
-		}
-
-		inline void setMustMatchAll(bool mustMatchAll1)
-		{
-			this->mustMatchAll = mustMatchAll1;
-		}
+		void setMustMatchAll(bool mustMatchAll1);
 
 		/**
 		Returns {@link log4cxx::spi::Filter#NEUTRAL NEUTRAL}
 		is there is no string match.
 		*/
-		FilterDecision decide(const spi::LoggingEventPtr& event) const;
+		FilterDecision decide(const spi::LoggingEventPtr& event) const override;
 }; // class MapFilter
 
 LOG4CXX_PTR_DEF(MapFilter);
@@ -109,8 +93,5 @@ LOG4CXX_PTR_DEF(MapFilter);
 } // namespace filter
 } // namespace log4cxx
 
-#if defined(_MSC_VER)
-	#pragma warning (pop)
-#endif
 
 #endif // _LOG4CXX_FILTER_MAPFILTER_H

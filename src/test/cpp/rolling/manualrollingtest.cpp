@@ -24,7 +24,6 @@
 #include <log4cxx/rolling/fixedwindowrollingpolicy.h>
 #include <log4cxx/rolling/sizebasedtriggeringpolicy.h>
 #include <log4cxx/filter/levelrangefilter.h>
-#include <log4cxx/helpers/pool.h>
 #include <log4cxx/logger.h>
 #include <log4cxx/propertyconfigurator.h>
 #include <log4cxx/rolling/rollingfileappender.h>
@@ -32,10 +31,9 @@
 #include <log4cxx/consoleappender.h>
 #include <log4cxx/helpers/exception.h>
 #include <log4cxx/helpers/fileoutputstream.h>
-
+#include <random>
 
 using namespace log4cxx;
-using namespace log4cxx::xml;
 using namespace log4cxx::filter;
 using namespace log4cxx::helpers;
 using namespace log4cxx::rolling;
@@ -55,6 +53,8 @@ LOGUNIT_CLASS(ManualRollingTest)
 	//           LOGUNIT_TEST(test3);
 	LOGUNIT_TEST(test4);
 	LOGUNIT_TEST(test5);
+	LOGUNIT_TEST(testShortFileNamePattern);
+	LOGUNIT_TEST(create_directories);
 	LOGUNIT_TEST_SUITE_END();
 
 	LoggerPtr root;
@@ -73,7 +73,6 @@ public:
 	}
 
 	void common(RollingFileAppenderPtr & rfa,
-		Pool & pool,
 		LoggerPtr & logger1)
 	{
 		char msg[] = { 'H', 'e', 'l', 'l', 'o', '-', '-', '-', 'N', 0 };
@@ -91,7 +90,7 @@ public:
 
 				if (digit == 0)
 				{
-					rfa->rollover(pool);
+					rfa->rollover();
 				}
 
 				msg[7] = '0' + i / 10;
@@ -120,19 +119,17 @@ public:
 		swrp->setMinIndex(0);
 
 		swrp->setFileNamePattern(LOG4CXX_STR("output/manual-test1.%i"));
-		Pool p;
-		swrp->activateOptions(p);
+		swrp->activateOptions();
 
 		rfa->setRollingPolicy(swrp);
-		rfa->activateOptions(p);
+		rfa->activateOptions();
 		root->addAppender(rfa);
 
+		common(rfa, logger);
 
-		common(rfa, p, logger);
-
-		LOGUNIT_ASSERT_EQUAL(true, File("output/manual-test1.0").exists(p));
-		LOGUNIT_ASSERT_EQUAL(true, File("output/manual-test1.1").exists(p));
-		LOGUNIT_ASSERT_EQUAL(true, File("output/manual-test1.2").exists(p));
+		LOGUNIT_ASSERT_EQUAL(true, File("output/manual-test1.0").exists());
+		LOGUNIT_ASSERT_EQUAL(true, File("output/manual-test1.1").exists());
+		LOGUNIT_ASSERT_EQUAL(true, File("output/manual-test1.2").exists());
 		LOGUNIT_ASSERT_EQUAL(true, Compare::compare(File("output/manual-test1.0"),
 				File("witness/rolling/sbr-test2.log")));
 		LOGUNIT_ASSERT_EQUAL(true, Compare::compare(File("output/manual-test1.1"),
@@ -153,15 +150,14 @@ public:
 		rfa->setLayout(layout);
 		rfa->setFile(LOG4CXX_STR("output/manual-test2.log"));
 
-		Pool p;
-		rfa->activateOptions(p);
+		rfa->activateOptions();
 		root->addAppender(rfa);
 
-		common(rfa, p, logger);
+		common(rfa, logger);
 
-		LOGUNIT_ASSERT_EQUAL(true, File("output/manual-test2.log").exists(p));
-		LOGUNIT_ASSERT_EQUAL(true, File("output/manual-test2.log.1").exists(p));
-		LOGUNIT_ASSERT_EQUAL(true, File("output/manual-test2.log.2").exists(p));
+		LOGUNIT_ASSERT_EQUAL(true, File("output/manual-test2.log").exists());
+		LOGUNIT_ASSERT_EQUAL(true, File("output/manual-test2.log.1").exists());
+		LOGUNIT_ASSERT_EQUAL(true, File("output/manual-test2.log.2").exists());
 
 		LOGUNIT_ASSERT_EQUAL(true, Compare::compare(File("output/manual-test2.log"),
 				File("witness/rolling/sbr-test2.log")));
@@ -169,6 +165,21 @@ public:
 				File("witness/rolling/sbr-test2.0")));
 		LOGUNIT_ASSERT_EQUAL(true, Compare::compare(File("output/manual-test2.log.2"),
 				File("witness/rolling/sbr-test2.1")));
+	}
+
+	void testShortFileNamePattern()
+	{
+		FixedWindowRollingPolicyPtr policy = FixedWindowRollingPolicyPtr(new FixedWindowRollingPolicy());
+		policy->setMinIndex(0);
+		policy->setMaxIndex(1);
+		policy->setFileNamePattern(LOG4CXX_STR("%i"));
+		policy->activateOptions();
+
+		RolloverDescriptionPtr desc = policy->rollover(
+				LOG4CXX_STR("output/manual-short-pattern-active.log"),
+				false);
+
+		LOGUNIT_ASSERT(desc != NULL);
 	}
 
 	/**
@@ -186,21 +197,20 @@ public:
 		fwrp->setMinIndex(0);
 		rfa->setFile(LOG4CXX_STR("output/manual-test3.log"));
 		fwrp->setFileNamePattern(LOG4CXX_STR("output/sbr-test3.%i.gz"));
-		Pool p;
-		fwrp->activateOptions(p);
+		fwrp->activateOptions();
 		rfa->setRollingPolicy(fwrp);
-		rfa->activateOptions(p);
+		rfa->activateOptions();
 		root->addAppender(rfa);
 
-		common(rfa, p, logger);
+		common(rfa, logger);
 
-		LOGUNIT_ASSERT_EQUAL(true, File("output/manual-test3.log").exists(p));
-		LOGUNIT_ASSERT_EQUAL(true, File("output/manual-test3.0.gz").exists(p));
-		LOGUNIT_ASSERT_EQUAL(true, File("output/manual-test3.1.gz").exists(p));
+		LOGUNIT_ASSERT_EQUAL(true, File("output/manual-test3.log").exists());
+		LOGUNIT_ASSERT_EQUAL(true, File("output/manual-test3.0.gz").exists());
+		LOGUNIT_ASSERT_EQUAL(true, File("output/manual-test3.1.gz").exists());
 
 		LOGUNIT_ASSERT_EQUAL(true, Compare::compare(File("output/manual-test3.log"),  File("witness/rolling/sbr-test3.log")));
-		LOGUNIT_ASSERT_EQUAL(File("witness/rolling/sbr-test3.0.gz").length(p), File("output/manual-test3.0.gz").length(p));
-		LOGUNIT_ASSERT_EQUAL(File("witness/rolling/sbr-test3.1.gz").length(p), File("output/manual-test3.1.gz").length(p));
+		LOGUNIT_ASSERT_EQUAL(File("witness/rolling/sbr-test3.0.gz").length(), File("output/manual-test3.0.gz").length());
+		LOGUNIT_ASSERT_EQUAL(File("witness/rolling/sbr-test3.1.gz").length(), File("output/manual-test3.1.gz").length());
 	}
 
 	/**
@@ -216,23 +226,22 @@ public:
 		rfa->setFile(LOG4CXX_STR("output/manual-test4.log"));
 
 		FixedWindowRollingPolicyPtr swrp = FixedWindowRollingPolicyPtr(new FixedWindowRollingPolicy());
-
+		swrp->setCreateIntermediateDirectories(false);
 		swrp->setMinIndex(0);
 
 		//
 		//   test4 directory should not exists.  Should cause all rollover attempts to fail.
 		//
 		swrp->setFileNamePattern(LOG4CXX_STR("output/test4/manual-test4.%i"));
-		Pool p;
-		swrp->activateOptions(p);
+		swrp->activateOptions();
 
 		rfa->setRollingPolicy(swrp);
-		rfa->activateOptions(p);
+		rfa->activateOptions();
 		root->addAppender(rfa);
 
-		common(rfa, p, logger);
+		common(rfa, logger);
 
-		LOGUNIT_ASSERT_EQUAL(true, File("output/manual-test4.log").exists(p));
+		LOGUNIT_ASSERT_EQUAL(true, File("output/manual-test4.log").exists());
 
 		LOGUNIT_ASSERT_EQUAL(true, Compare::compare(File("output/manual-test4.log"),
 				File("witness/rolling/sbr-test4.log")));
@@ -256,35 +265,34 @@ public:
 		swrp->setMinIndex(0);
 
 		swrp->setFileNamePattern(LOG4CXX_STR("output/manual-test5.%i"));
-		Pool p;
-		swrp->activateOptions(p);
+		swrp->activateOptions();
 
 		rfa->setRollingPolicy(swrp);
-		rfa->activateOptions(p);
+		rfa->activateOptions();
 		root->addAppender(rfa);
 
 		//
 		//   put stray file about locked file
 		FileOutputStream os1(LOG4CXX_STR("output/manual-test5.1"), false);
-		os1.close(p);
+		os1.close();
 
 
 		FileOutputStream os0(LOG4CXX_STR("output/manual-test5.0"), false);
 
-		common(rfa, p, logger);
+		common(rfa, logger);
 
-		os0.close(p);
+		os0.close();
 
-		if (File("output/manual-test5.3").exists(p))
+		if (File("output/manual-test5.3").exists())
 		{
 			//
 			//    looks like platform where open files can be renamed
 			//
-			LOGUNIT_ASSERT_EQUAL(true, File("output/manual-test5.log").exists(p));
-			LOGUNIT_ASSERT_EQUAL(true, File("output/manual-test5.0").exists(p));
-			LOGUNIT_ASSERT_EQUAL(true, File("output/manual-test5.1").exists(p));
-			LOGUNIT_ASSERT_EQUAL(true, File("output/manual-test5.2").exists(p));
-			LOGUNIT_ASSERT_EQUAL(true, File("output/manual-test5.3").exists(p));
+			LOGUNIT_ASSERT_EQUAL(true, File("output/manual-test5.log").exists());
+			LOGUNIT_ASSERT_EQUAL(true, File("output/manual-test5.0").exists());
+			LOGUNIT_ASSERT_EQUAL(true, File("output/manual-test5.1").exists());
+			LOGUNIT_ASSERT_EQUAL(true, File("output/manual-test5.2").exists());
+			LOGUNIT_ASSERT_EQUAL(true, File("output/manual-test5.3").exists());
 
 			LOGUNIT_ASSERT_EQUAL(true, Compare::compare(File("output/manual-test5.log"),
 					File("witness/rolling/sbr-test2.log")));
@@ -301,13 +309,49 @@ public:
 			//    so initial log file should have all log content
 			//    open file should be unaffected
 			//    stray file should have only been moved one slot.
-			LOGUNIT_ASSERT_EQUAL(true, File("output/manual-test5.log").exists(p));
-			LOGUNIT_ASSERT_EQUAL(true, File("output/manual-test5.0").exists(p));
-			LOGUNIT_ASSERT_EQUAL(true, File("output/manual-test5.2").exists(p));
+			LOGUNIT_ASSERT_EQUAL(true, File("output/manual-test5.log").exists());
+			LOGUNIT_ASSERT_EQUAL(true, File("output/manual-test5.0").exists());
+			LOGUNIT_ASSERT_EQUAL(true, File("output/manual-test5.2").exists());
 
 			LOGUNIT_ASSERT_EQUAL(true, Compare::compare(File("output/manual-test5.log"),
 					File("witness/rolling/sbr-test4.log")));
 		}
+	}
+
+	void create_directories()
+	{
+		PatternLayoutPtr layout = PatternLayoutPtr(new PatternLayout(LOG4CXX_STR("%m\n")));
+		RollingFileAppenderPtr rfa = RollingFileAppenderPtr(new RollingFileAppender());
+		rfa->setName(LOG4CXX_STR("ROLLING"));
+		rfa->setAppend(false);
+		rfa->setLayout(layout);
+		rfa->setFile(LOG4CXX_STR("output/create-directory-file.log"));
+
+		FixedWindowRollingPolicyPtr swrp = FixedWindowRollingPolicyPtr(new FixedWindowRollingPolicy());
+		swrp->setMinIndex(0);
+
+		std::random_device dev;
+		std::mt19937 rng(dev());
+		std::uniform_int_distribution<std::mt19937::result_type> dist(1,100000);
+		LogString filenamePattern = LOG4CXX_STR("output/directory-");
+
+		LogString dirNumber;
+		StringHelper::toString(static_cast<int>(dist(rng)), dirNumber);
+
+		filenamePattern.append( dirNumber );
+		LogString filenamePatternPrefix = filenamePattern;
+		filenamePattern.append( LOG4CXX_STR("/file-%i.gz") );
+		swrp->setFileNamePattern(filenamePattern);
+		swrp->activateOptions();
+
+		rfa->setRollingPolicy(swrp);
+		rfa->activateOptions();
+		root->addAppender(rfa);
+
+		common(rfa, logger);
+
+		LOGUNIT_ASSERT_EQUAL(true, File(filenamePatternPrefix + LOG4CXX_STR("/file-0.gz")).exists());
+		LOGUNIT_ASSERT_EQUAL(true, File(filenamePatternPrefix + LOG4CXX_STR("/file-1.gz")).exists());
 	}
 
 };

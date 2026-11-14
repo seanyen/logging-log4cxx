@@ -17,6 +17,7 @@
 
 
 #include <log4cxx/logger.h>
+#include <log4cxx/spi/loggerrepository.h>
 #include "logunit.h"
 //
 //  If there is no support for wchar_t logging then
@@ -58,8 +59,10 @@ public:
 	 */
 	void tearDown()
 	{
-		log4cxx::spi::LoggerRepositoryPtr rep = Logger::getRootLogger()->getLoggerRepository().lock();
-		if (rep) {
+		auto rep = Logger::getRootLogger()->getLoggerRepository();
+
+		if (rep)
+		{
 			rep->resetConfiguration();
 		}
 	}
@@ -168,16 +171,15 @@ private:
 	{
 		FileAppenderPtr  appender(new FileAppender());
 		PatternLayoutPtr layout(new PatternLayout());
-		Pool             p;
 
 		layout->setConversionPattern(LOG4CXX_STR("%p - %m\n"));
-		layout->activateOptions(p);
+		layout->activateOptions();
 
 		appender->setAppend(false);
 		appender->setEncoding(encoding);
 		appender->setFile(filename);
 		appender->setLayout(layout);
-		appender->activateOptions(p);
+		appender->activateOptions();
 
 		logger->addAppender(appender);
 		logger->setLevel(Level::getInfo());

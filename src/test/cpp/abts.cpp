@@ -29,6 +29,10 @@ static int verbose = 0;
 static int exclude = 0;
 static int quiet = 0;
 static int list_tests = 0;
+static char errorPrefix[] = {"\x1B[31m"}; // red
+static char warnPrefix[] = {"\x1B[33m"};  // yellow
+static char infoPrefix[] = {"\x1B[32m"};  // green
+static char msgSuffix[] = {"\x1B[0m"};    // none
 
 const char** testlist = NULL;
 //  defined in logunit.cpp
@@ -101,14 +105,14 @@ static void end_suite(abts_suite* suite)
 			fflush(stdout);
 		}
 
-		if (last->failed == 0)
+		if (last->failed.size() == 0)
 		{
-			fprintf(stdout, "SUCCESS\n");
+			fprintf(stdout, "%sSUCCESS%s\n", infoPrefix, msgSuffix);
 			fflush(stdout);
 		}
 		else
 		{
-			fprintf(stdout, "FAILED %d of %d\n", last->failed, last->num_test);
+			fprintf(stdout, "%sFAILED %d of %d%s\n", warnPrefix, (int)last->failed.size(), last->num_test, msgSuffix);
 			fflush(stdout);
 		}
 	}
@@ -127,9 +131,9 @@ abts_suite* abts_add_suite(abts_suite* suite, const char* suite_name_full)
 		end_suite(suite);
 	}
 
-	subsuite = (sub_suite*) malloc(sizeof(*subsuite));
+	subsuite = new sub_suite();
 	subsuite->num_test = 0;
-	subsuite->failed = 0;
+	subsuite->failed.clear();
 	subsuite->next = NULL;
 	/* suite_name_full may be an absolute path depending on __FILE__
 	 * expansion */
@@ -148,8 +152,8 @@ abts_suite* abts_add_suite(abts_suite* suite, const char* suite_name_full)
 
 	if (p)
 	{
-		subsuite->name = (const char*) memcpy(calloc(p - suite_name + 1, 1),
-				suite_name, p - suite_name);
+		auto length = p - suite_name;
+		subsuite->name = std::string( suite_name, length );
 	}
 	else
 	{
@@ -158,14 +162,14 @@ abts_suite* abts_add_suite(abts_suite* suite, const char* suite_name_full)
 
 	if (list_tests)
 	{
-		fprintf(stdout, "%s\n", subsuite->name);
+		fprintf(stdout, "%s\n", subsuite->name.c_str());
 	}
 
 	subsuite->not_run = 0;
 
 	if (suite == NULL)
 	{
-		suite = (abts_suite*) malloc(sizeof(*suite));
+		suite = new abts_suite();
 		suite->head = subsuite;
 		suite->tail = subsuite;
 	}
@@ -175,26 +179,26 @@ abts_suite* abts_add_suite(abts_suite* suite, const char* suite_name_full)
 		suite->tail = subsuite;
 	}
 
-	if (!should_test_run(subsuite->name))
+	if (!should_test_run(subsuite->name.c_str()))
 	{
 		subsuite->not_run = 1;
 		return suite;
 	}
 
 	reset_status();
-	fprintf(stdout, "%-20s:  ", subsuite->name);
+	fprintf(stdout, (verbose ? "%s:\n" :"%-20s:  "), subsuite->name.c_str());
 	update_status();
 	fflush(stdout);
 
 	return suite;
 }
 
-void abts_run_test(abts_suite* ts, test_func f, void* value)
+void abts_run_test(abts_suite* ts, const char* name, test_func f, void* value)
 {
 	abts_case tc;
 	sub_suite* ss;
 
-	if (!should_test_run(ts->tail->name))
+	if (!should_test_run(name))
 	{
 		return;
 	}
@@ -207,17 +211,22 @@ void abts_run_test(abts_suite* ts, test_func f, void* value)
 	ss->num_test++;
 	update_status();
 
+	if (verbose)
+	{
+		fprintf(stdout, "  %s\n", name);
+		fflush(stdout);
+	}
 	f(&tc, value);
 
 	if (tc.failed)
 	{
-		ss->failed++;
+		ss->failed.push_back(name);
 	}
 }
 
 static int report(abts_suite* suite)
 {
-	int count = 0;
+	size_t count = 0;
 	sub_suite* dptr;
 
 	if (suite && suite->tail && !suite->tail->not_run)
@@ -227,7 +236,7 @@ static int report(abts_suite* suite)
 
 	for (dptr = suite->head; dptr; dptr = dptr->next)
 	{
-		count += dptr->failed;
+		count += dptr->failed.size();
 	}
 
 	if (list_tests)
@@ -237,21 +246,24 @@ static int report(abts_suite* suite)
 
 	if (count == 0)
 	{
-		printf("All tests passed.\n");
+		fprintf(stdout, "%sAll tests passed.%s\n", infoPrefix, msgSuffix);
 		return 0;
 	}
 
 	dptr = suite->head;
-	fprintf(stdout, "%-15s\t\tTotal\tFail\tFailed %%\n", "Failed Tests");
-	fprintf(stdout, "===================================================\n");
+	fprintf(stdout, "%s%-35s\t\tTotal\tFail\tFailed %%%s\n", warnPrefix, "Failed Tests", msgSuffix);
+	fprintf(stdout, "%s=======================================================================%s\n", warnPrefix, msgSuffix);
 
 	while (dptr != NULL)
 	{
-		if (dptr->failed != 0)
+		if (dptr->failed.size() != 0)
 		{
-			float percent = ((float)dptr->failed / (float)dptr->num_test);
-			fprintf(stdout, "%-15s\t\t%5d\t%4d\t%6.2f%%\n", dptr->name,
-				dptr->num_test, dptr->failed, percent * 100);
+			float percent = ((float)dptr->failed.size() / (float)dptr->num_test);
+			fprintf(stdout, "%s%-35s\t\t%5d\t%4d\t%6.2f%%%s\n", warnPrefix, dptr->name.c_str(),
+				dptr->num_test, (int)dptr->failed.size(), percent * 100, msgSuffix);
+			for( const char* failed_name : dptr->failed ){
+				fprintf(stdout, "  %s%s%s\n", warnPrefix, failed_name, msgSuffix);
+			}
 		}
 
 		dptr = dptr->next;
@@ -293,7 +305,7 @@ void abts_int_equal(abts_case* tc, const int expected, const int actual, int lin
 
 	if (verbose)
 	{
-		fprintf(stderr, "Line %d: expected <%d>, but saw <%d>\n", lineno, expected, actual);
+		fprintf(stderr, "%sLine %d: expected <%d>, but saw <%d>%s\n", warnPrefix, lineno, expected, actual, msgSuffix);
 		fflush(stderr);
 	}
 }
@@ -316,7 +328,7 @@ void abts_int_nequal(abts_case* tc, const int expected, const int actual, int li
 
 	if (verbose)
 	{
-		fprintf(stderr, "Line %d: expected <%d>, but saw <%d>\n", lineno, expected, actual);
+		fprintf(stderr, "%sLine %d: expected <%d>, but saw <%d>%s\n", warnPrefix, lineno, expected, actual, msgSuffix);
 		fflush(stderr);
 	}
 }
@@ -340,8 +352,8 @@ void abts_size_equal(abts_case* tc, size_t expected, size_t actual, int lineno)
 	if (verbose)
 	{
 		/* Note that the comparison is type-exact, reporting must be a best-fit */
-		fprintf(stderr, "Line %d: expected %lu, but saw %lu\n", lineno,
-			(unsigned long)expected, (unsigned long)actual);
+		fprintf(stderr, "%sLine %d: expected %lu, but saw %lu%s\n", warnPrefix, lineno,
+			(unsigned long)expected, (unsigned long)actual, msgSuffix);
 		fflush(stderr);
 	}
 }
@@ -370,7 +382,7 @@ void abts_str_equal(abts_case* tc, const char* expected, const char* actual, int
 
 	if (verbose)
 	{
-		fprintf(stderr, "Line %d: expected <%s>, but saw <%s>\n", lineno, expected, actual);
+		fprintf(stderr, "%sLine %d: expected <%s>, but saw <%s>%s\n", warnPrefix, lineno, expected, actual, msgSuffix);
 		fflush(stderr);
 	}
 }
@@ -394,7 +406,7 @@ void abts_str_nequal(abts_case* tc, const char* expected, const char* actual,
 
 	if (verbose)
 	{
-		fprintf(stderr, "Line %d: expected <%s>, but saw <%s>\n", lineno, expected, actual);
+		fprintf(stderr, "%sLine %d: expected <%s>, but saw <%s>%s\n", warnPrefix, lineno, expected, actual, msgSuffix);
 		fflush(stderr);
 	}
 }
@@ -417,7 +429,7 @@ void abts_ptr_notnull(abts_case* tc, const void* ptr, int lineno)
 
 	if (verbose)
 	{
-		fprintf(stderr, "Line %d: Expected NULL, but saw <%p>\n", lineno, ptr);
+		fprintf(stderr, "%sLine %d: Expected NULL, but saw <%p>%s\n", warnPrefix, lineno, ptr, msgSuffix);
 		fflush(stderr);
 	}
 }
@@ -440,7 +452,7 @@ void abts_ptr_equal(abts_case* tc, const void* expected, const void* actual, int
 
 	if (verbose)
 	{
-		fprintf(stderr, "Line %d: expected <%p>, but saw <%p>\n", lineno, expected, actual);
+		fprintf(stderr, "%sLine %d: expected <%p>, but saw <%p>%s\n", warnPrefix, lineno, expected, actual, msgSuffix);
 		fflush(stderr);
 	}
 }
@@ -458,7 +470,7 @@ void abts_fail(abts_case* tc, const char* message, int lineno)
 
 	if (verbose)
 	{
-		fprintf(stderr, "Line %d: %s\n", lineno, message);
+		fprintf(stderr, "%sLine %d: %s%s\n", warnPrefix, lineno, message, msgSuffix);
 		fflush(stderr);
 	}
 }
@@ -481,7 +493,7 @@ void abts_assert(abts_case* tc, const char* message, int condition, int lineno)
 
 	if (verbose)
 	{
-		fprintf(stderr, "Line %d: %s\n", lineno, message);
+		fprintf(stderr, "%sLine %d: %s%s\n", warnPrefix, lineno, message, msgSuffix);
 		fflush(stderr);
 	}
 }
@@ -504,7 +516,7 @@ void abts_true(abts_case* tc, int condition, int lineno)
 
 	if (verbose)
 	{
-		fprintf(stderr, "Line %d: Condition is false, but expected true\n", lineno);
+		fprintf(stderr, "%sLine %d: Condition is false, but expected true%s\n", warnPrefix, lineno, msgSuffix);
 		fflush(stderr);
 	}
 }
@@ -517,15 +529,14 @@ void abts_not_impl(abts_case* tc, const char* message, int lineno)
 
 	if (verbose)
 	{
-		fprintf(stderr, "Line %d: %s\n", lineno, message);
+		fprintf(stderr, "%sLine %d: %s%s\n", warnPrefix, lineno, message, msgSuffix);
 		fflush(stderr);
 	}
 }
 
 int main(int argc, const char* const argv[])
 {
-	int i;
-	int rv;
+	int rv = 0;
 	int list_provided = 0;
 	abts_suite* suite = NULL;
 
@@ -537,7 +548,7 @@ int main(int argc, const char* const argv[])
 	quiet = !isatty(STDOUT_FILENO);
 #endif
 
-	for (i = 1; i < argc; i++)
+	for (int i = 1; i < argc; i++)
 	{
 		if (!strcmp(argv[i], "-v"))
 		{
@@ -565,7 +576,7 @@ int main(int argc, const char* const argv[])
 
 		if (argv[i][0] == '-')
 		{
-			fprintf(stderr, "Invalid option: `%s'\n", argv[i]);
+			fprintf(stderr, "%sInvalid option: `%s'%s\n", errorPrefix, argv[i], msgSuffix);
 			exit(1);
 		}
 
@@ -579,7 +590,7 @@ int main(int argc, const char* const argv[])
 		 */
 		testlist = (const char**) calloc(argc + 1, sizeof(char*));
 
-		for (i = 1; i < argc; i++)
+		for (int i = 1; i < argc; i++)
 		{
 			testlist[i - 1] = argv[i];
 		}
@@ -597,16 +608,16 @@ int main(int argc, const char* const argv[])
 		//
 		//    clean up suite
 		//
+		// We're about to exit, who cares about memory leaks?
 		sub_suite* next;
 
 		for (sub_suite* head = suite->head; head != NULL; head = next)
 		{
 			next = head->next;
-			free((void*) head->name);
-			free(head);
+			delete head;
 		}
 
-		free(suite);
+		delete suite;
 	}
 
 	return rv;

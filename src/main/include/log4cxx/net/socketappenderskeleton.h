@@ -19,192 +19,184 @@
 #define _LOG4CXX_NET_SOCKET_APPENDER_SKELETON_H
 
 #include <log4cxx/appenderskeleton.h>
-#include <log4cxx/helpers/socket.h>
-#include <log4cxx/helpers/objectoutputstream.h>
-#include <thread>
-#include <condition_variable>
+#include <log4cxx/helpers/inetaddress.h>
 
-#if defined(_MSC_VER)
-	#pragma warning ( push )
-	#pragma warning ( disable: 4251 )
-#endif
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 
 namespace net
 {
 
 /**
- *  Abstract base class for SocketAppender and XMLSocketAppender
+Abstract base class that sends spi::LoggingEvent elements to a remote server.
+
+\anchor socket_appender_properties
+This appender has the following properties:
+
+- The event will be logged with the same time stamp,
+NDC, location info as if it were logged locally by
+the client.
+
+- Remote logging uses the TCP protocol,
+so if the server is reachable,
+log events will eventually arrive at the server.
+
+- If the remote server is down, the logging requests are simply dropped.
+However, if and when the server comes back up,
+then event transmission is resumed transparently.
+This transparent reconneciton is performed by a <em>connector</em>
+task which periodically attempts to connect to the server.
+
+- Logging events are automatically <em>buffered</em> by the
+native TCP implementation. This means that if the link to server
+is slow but still faster than the rate of (log) event production
+by the client, the client will not be affected by the slow
+network connection. However, if the network connection is slower
+then the rate of event production, then the client can only
+progress at the network rate. In particular, if the network link
+to the the server is down, the client will be blocked.
+On the other hand, if the network link is up, but the server
+is down, the client will not be blocked when making log requests
+but the log events will be lost due to server unavailability.
+
+- If the application hosting this appender exits before it is closed,
+either explicitly or subsequent to destruction,
+then there might be untransmitted data in the pipe which might be lost.
+
+To avoid lost data, it is usually sufficient to
+#close the appender either explicitly or by
+calling the LogManager#shutdown method
+before exiting the application.
+
+A periodic task will connect when the server becomes available.
+It does this by attempting to open a new connection every
+<code>millisecondDelay</code> milliseconds.
+
+The periodic task stops trying whenever a connection is established.
+It will restart attempting to open a new connection to the server
+when a previously open connection is droppped.
  */
 class LOG4CXX_EXPORT SocketAppenderSkeleton : public AppenderSkeleton
 {
-	private:
-		/**
-		host name
-		*/
-		LogString remoteHost;
-
-		/**
-		IP address
-		*/
-		helpers::InetAddressPtr address;
-
-		int port;
-		int reconnectionDelay;
-		bool locationInfo;
+	protected:
+		struct SocketAppenderSkeletonPriv;
 
 	public:
-		SocketAppenderSkeleton(int defaultPort, int reconnectionDelay);
+		/**
+		A unconnected appender sending to \c defaultPort,
+		with a retry after \c millisecondDelay when unable to establish a connection.
+		*/
+		SocketAppenderSkeleton(int defaultPort, int millisecondDelay);
+
+		/**
+		Close and shutdown the connection if not already done.
+		*/
 		~SocketAppenderSkeleton();
 
 		/**
-		Connects to remote server at <code>address</code> and <code>port</code>.
+		A remote server at <code>address</code> and <code>port</code>,
+		with a retry after \c millisecondDelay when unable to establish a connection.
 		*/
-		SocketAppenderSkeleton(helpers::InetAddressPtr address, int port, int reconnectionDelay);
+		SocketAppenderSkeleton(const helpers::InetAddressPtr& address, int port, int millisecondDelay);
 
 		/**
-		Connects to remote server at <code>host</code> and <code>port</code>.
+		A remote server at <code>host</code> and <code>port</code>,
+		with a retry after \c millisecondDelay when unable to establish a connection.
 		*/
-		SocketAppenderSkeleton(const LogString& host, int port, int reconnectionDelay);
+		SocketAppenderSkeleton(const LogString& host, int port, int millisecondDelay);
 
+		using spi::OptionHandler::activateOptions;
 		/**
-		Connect to the specified <b>RemoteHost</b> and <b>Port</b>.
+		Connects to the configured <b>RemoteHost</b> and <b>Port</b>.
 		*/
-		void activateOptions(log4cxx::helpers::Pool& p);
-
-		void close();
-
+		void activateOptions(  ) override;
 
 		/**
-		* This appender does not use a layout. Hence, this method
-		* returns <code>false</code>.
-		*
-		     */
-		bool requiresLayout() const
-		{
-			return false;
-		}
+		Sends the message that the configured Layout produces from \c event to the output sink.
+		*/
+		void append( const spi::LoggingEventPtr& event ) override;
 
 		/**
-		* The <b>RemoteHost</b> option takes a string value which should be
-		* the host name of the server where a
-		* Apache Chainsaw or compatible is running.
+		* Use \c newValue as the name of the server.
 		* */
-		inline void setRemoteHost(const LogString& host)
-		{
-			address = helpers::InetAddress::getByName(host);
-			remoteHost.assign(host);
-		}
+		void setRemoteHost(const LogString& newValue);
 
 		/**
 		Returns value of the <b>RemoteHost</b> option.
 		*/
-		inline const LogString& getRemoteHost() const
-		{
-			return remoteHost;
-		}
+		const LogString& getRemoteHost() const;
 
 		/**
-		The <b>Port</b> option takes a positive integer representing
-		the port where the server is waiting for connections.
+		Use \c newValue, which must be a positive integer,
+		as the port on which the server is waiting for connections.
 		*/
-		void setPort(int port1)
-		{
-			this->port = port1;
-		}
+		void setPort(int newValue);
 
 		/**
 		Returns value of the <b>Port</b> option.
 		*/
-		int getPort() const
-		{
-			return port;
-		}
+		int getPort() const;
 
 		/**
-		The <b>LocationInfo</b> option takes a boolean value. If true,
-		the information sent to the remote host will include location
-		information. By default no location information is sent to the server.
+		Use \c millisecondDelay as the number of milliseconds to wait between each
+		failed connection attempt to the server.
+
+		Setting this option to zero turns off reconnection capability.
 		*/
-		void setLocationInfo(bool locationInfo1)
-		{
-			this->locationInfo = locationInfo1;
-		}
+		void setReconnectionDelay(int millisecondDelay);
 
 		/**
-		Returns value of the <b>LocationInfo</b> option.
+		The value of the <b>ReconnectionDelay</b> option,
+		the number of milliseconds to wait between each
+		failed connection attempt to the server.
 		*/
-		bool getLocationInfo() const
-		{
-			return locationInfo;
-		}
+		int getReconnectionDelay() const;
 
 		/**
-		The <b>ReconnectionDelay</b> option takes a positive integer
-		representing the number of milliseconds to wait between each
-		failed connection attempt to the server. The default value of
-		this option is 30000 which corresponds to 30 seconds.
-
-		<p>Setting this option to zero turns off reconnection
-		capability.
-		*/
-		void setReconnectionDelay(int reconnectionDelay1)
-		{
-			this->reconnectionDelay = reconnectionDelay1;
-		}
+		* Use \c newSubclass as the helpers::Socket interface instead of the default implementation.
+		* */
+		void setSocketSubclass(const LogString& newSubclass);
 
 		/**
-		Returns value of the <b>ReconnectionDelay</b> option.
+		The class name used for the helpers::Socket interface implemention.
 		*/
-		int getReconnectionDelay() const
-		{
-			return reconnectionDelay;
-		}
+		const LogString& getSocketSubclass() const;
 
-		void fireConnector();
+		/**
+		\copybrief AppenderSkeleton::setOption()
 
-		void setOption(const LogString& option,
-			const LogString& value);
+		Supported options | Supported values | Default value |
+		-------------- | ---------------- | --------------- |
+		RemoteHost |  (\ref inetAddress "1") | - |
+		Port | {int} | (\ref defaultPort "2") |
+		SocketSubclass |  (\ref socketSubclass "3") | APRSocket |
+
+		\anchor inetAddress (1) A valid internet address.
+
+		\anchor defaultPort (2) Provided by the derived class.
+
+		\anchor socketSubclass (3) A registered class derived from helpers::Socket.
+
+		\sa AppenderSkeleton::setOption()
+		*/
+		void setOption(const LogString& option, const LogString& value) override;
 
 	protected:
-
-		virtual void setSocket(log4cxx::helpers::SocketPtr& socket, log4cxx::helpers::Pool& p) = 0;
-
-		virtual void cleanUp(log4cxx::helpers::Pool& p) = 0;
+		SocketAppenderSkeleton(std::unique_ptr<SocketAppenderSkeletonPriv> priv);
 
 		virtual int getDefaultDelay() const = 0;
 
 		virtual int getDefaultPort() const = 0;
 
 	private:
-		void connect(log4cxx::helpers::Pool& p);
-		/**
-		     The Connector will reconnect when the server becomes available
-		     again.  It does this by attempting to open a new connection every
-		     <code>reconnectionDelay</code> milliseconds.
 
-		     <p>It stops trying whenever a connection is established. It will
-		     restart to try reconnect to the server when previously open
-		     connection is droppped.
-		     */
-
-		std::thread thread;
-		std::condition_variable interrupt;
-		std::mutex interrupt_mutex;
-		void monitor();
-		bool is_closed();
 		SocketAppenderSkeleton(const SocketAppenderSkeleton&);
 		SocketAppenderSkeleton& operator=(const SocketAppenderSkeleton&);
 
 }; // class SocketAppenderSkeleton
 } // namespace net
 } // namespace log4cxx
-
-#if defined(_MSC_VER)
-	#pragma warning (pop)
-#endif
 
 #endif // _LOG4CXX_NET_SOCKET_APPENDER_SKELETON_H
 

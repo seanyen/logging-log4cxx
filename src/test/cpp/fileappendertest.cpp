@@ -14,13 +14,45 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <log4cxx/helpers/pool.h>
-#include <log4cxx/fileappender.h>
+#include <log4cxx/basicconfigurator.h>
+#include <log4cxx/logmanager.h>
 #include <log4cxx/patternlayout.h>
+#include <log4cxx/helpers/pool.h>
+#include <log4cxx/helpers/loglog.h>
+#include <log4cxx/helpers/stringhelper.h>
+#include <log4cxx/helpers/transcoder.h>
+#include <log4cxx/helpers/exception.h>
+#include <log4cxx/helpers/fileoutputstream.h>
+#include <log4cxx/helpers/threadutility.h>
+#include <log4cxx/rolling/rollingfileappender.h>
+#include <log4cxx/rolling/timebasedrollingpolicy.h>
 #include "logunit.h"
+#include <apr_time.h>
+#include <apr_thread_proc.h>
+#include <fstream>
 
 using namespace log4cxx;
 using namespace log4cxx::helpers;
+
+auto getLogger(const LogString& name = {}) -> LoggerPtr {
+	static struct log4cxx_initializer {
+		log4cxx_initializer() {
+			auto layout = std::make_shared<PatternLayout>(LOG4CXX_STR("%d %m%n"));
+			auto writer = std::make_shared<FileAppender>(layout, LOG4CXX_STR("output/newdir/temp.log"), false);
+			writer->setName(LOG4CXX_STR("FileAppender"));
+			writer->setBufferedIO(true);
+			writer->setBufferedSeconds(1);
+			writer->activateOptions();
+			BasicConfigurator::configure(writer);
+		}
+		~log4cxx_initializer() {
+			LogManager::shutdown();
+		}
+	} initAndShutdown;
+	return name.empty()
+		? LogManager::getRootLogger()
+		: LogManager::getLogger(name);
+}
 
 
 /**
@@ -31,9 +63,24 @@ LOGUNIT_CLASS(FileAppenderTest)
 {
 	LOGUNIT_TEST_SUITE(FileAppenderTest);
 	LOGUNIT_TEST(testDirectoryCreation);
+	LOGUNIT_TEST(testLazyFileCreation);
 	LOGUNIT_TEST(testgetSetThreshold);
 	LOGUNIT_TEST(testIsAsSevereAsThreshold);
+	LOGUNIT_TEST(testFlushTaskRemovedAfterRename);
+	LOGUNIT_TEST(testPeriodicFlush);
+	LOGUNIT_TEST(writeFinalBufferOutput);
+	LOGUNIT_TEST(checkFinalBufferOutput);
 	LOGUNIT_TEST_SUITE_END();
+
+#ifdef _DEBUG
+	struct Fixture
+	{
+		Fixture() {
+			helpers::LogLog::setInternalDebugging(true);
+		}
+	} suiteFixture;
+#endif
+
 public:
 	/**
 	 * Tests that any necessary directories are attempted to
@@ -43,18 +90,42 @@ public:
 	void testDirectoryCreation()
 	{
 		File newFile(LOG4CXX_STR("output/newdir/temp.log"));
-		Pool p;
-		newFile.deleteFile(p);
+		newFile.deleteFile();
 
 		File newDir(LOG4CXX_STR("output/newdir"));
-		newDir.deleteFile(p);
+		newDir.deleteFile();
 
 		FileAppenderPtr wa(new FileAppender());
 		wa->setFile(LOG4CXX_STR("output/newdir/temp.log"));
 		wa->setLayout(PatternLayoutPtr(new PatternLayout(LOG4CXX_STR("%m%n"))));
-		wa->activateOptions(p);
+		wa->activateOptions();
 
-		LOGUNIT_ASSERT(File(LOG4CXX_STR("output/newdir/temp.log")).exists(p));
+		LOGUNIT_ASSERT(File(LOG4CXX_STR("output/newdir/temp.log")).exists());
+	}
+
+	/**
+	 * Tests that the LazyFileCreation option defers file creation until the first write.
+	 */
+	void testLazyFileCreation()
+	{
+		LogString fileName(LOG4CXX_STR("output/lazydir/lazy.log"));
+		File(fileName).deleteFile();
+		File(LOG4CXX_STR("output/lazydir")).deleteFile();
+
+		FileAppenderPtr wa(new FileAppender());
+		wa->setFile(fileName);
+		wa->setLazyFileCreation(true);
+		wa->setLayout(PatternLayoutPtr(new PatternLayout(LOG4CXX_STR("%m%n"))));
+		wa->activateOptions();
+		LOGUNIT_ASSERT(!File(fileName).exists());
+
+		auto logger = Logger::getLogger(LOG4CXX_STR("testLazyFileCreation"));
+		logger->addAppender(wa);
+		logger->setAdditivity(false);
+		LOG4CXX_INFO(logger, "trigger lazy file creation");
+		logger->removeAppender(wa);
+
+		LOGUNIT_ASSERT(File(fileName).exists());
 	}
 
 	/**
@@ -80,6 +151,185 @@ public:
 		FileAppenderPtr appender = FileAppenderPtr(new FileAppender());
 		LevelPtr debug = Level::getDebug();
 		LOGUNIT_ASSERT(appender->isAsSevereAsThreshold(debug));
+	}
+
+	/**
+	 * The periodic flush task must not outlive its appender:
+	 * it references the appender's output buffer.  Renaming the appender
+	 * after activateOptions() previously orphaned the task (it was keyed
+	 * by the mutable appender name), leaving it to flush through freed
+	 * memory every bufferedSeconds after the appender was destroyed.
+	 */
+	void testFlushTaskRemovedAfterRename()
+	{
+		LogString initialName(LOG4CXX_STR("flushTaskRemovalTest"));
+		{
+			auto appender = std::make_shared<FileAppender>();
+			appender->setName(initialName);
+			appender->setFile(LOG4CXX_STR("output/newdir/flushtask.log"));
+			appender->setLayout(std::make_shared<PatternLayout>(LOG4CXX_STR("%m%n")));
+			appender->setBufferedIO(true);
+			appender->setBufferedSeconds(1);
+			appender->activateOptions();
+			appender->setName(LOG4CXX_STR("someOtherName"));
+		}
+		// No flush task registered under any name may survive the appender
+		LOGUNIT_ASSERT(!ThreadUtility::instance()->hasPeriodicTask(initialName));
+		LOGUNIT_ASSERT(!ThreadUtility::instance()->hasPeriodicTask(LOG4CXX_STR("someOtherName")));
+		// Wait for background thread to stop
+		ThreadUtility::instance()->removeAllPeriodicTasks();
+	}
+
+	// Check a file is periodically flushed
+	void testPeriodicFlush()
+	{
+		auto logger = getLogger();
+		int requiredMsgCount = 10000;
+		for ( int x = 0; x < requiredMsgCount; x++ )
+		{
+			LOG4CXX_INFO( logger, "This is test message " << x );
+		}
+		auto appender = log4cxx::cast<FileAppender>(logger->getAppender(LOG4CXX_STR("FileAppender")));
+		LOGUNIT_ASSERT(appender);
+		File file(appender->getFile());
+		size_t initialLength = file.length();
+
+		// wait 1.2 sec and check the buffer is flushed
+		apr_sleep(1200000);
+		size_t flushedLength = file.length();
+
+		// Check the file extended
+		if (helpers::LogLog::isDebugEnabled())
+		{
+			LogString msg(LOG4CXX_STR("initialLength "));
+			helpers::StringHelper::toString(initialLength, msg);
+			msg += LOG4CXX_STR(" flushedLength ");
+			helpers::StringHelper::toString(flushedLength, msg);
+			helpers::LogLog::debug(msg);
+		}
+		LOGUNIT_ASSERT(initialLength < flushedLength);
+	}
+
+	// Used to check the buffer is flushed at exit
+	void writeFinalBufferOutput()
+	{
+		auto logLabel = LogLog::getCategory(LOG4CXX_STR("writeFinalBufferOutput"));
+		LOGLOG_DEBUG(logLabel, "configuing");
+		int requiredMsgCount = 100;
+		auto logger = getLogger(LOG4CXX_STR("100message"));
+
+		// Set up a new file
+		LogString dir{ LOG4CXX_STR("output/newdir") };
+		auto writer = std::make_shared<rolling::RollingFileAppender>();
+		writer->setLayout(std::make_shared<PatternLayout>(LOG4CXX_STR("%d %m%n")));
+		writer->setFile(dir + LOG4CXX_STR("/100message.log"));
+		writer->setBufferedIO(true);
+		writer->setBufferedSeconds(1);
+		auto policy = std::make_shared<rolling::TimeBasedRollingPolicy>();
+		policy->setFileNamePattern(dir + LOG4CXX_STR("/100message-%d{yyyy}.log"));
+		writer->setRollingPolicy(policy);
+		writer->activateOptions();
+		logger->setAdditivity(false);
+		logger->addAppender(writer);
+
+		LOGLOG_DEBUG(logLabel, "started");
+		for ( int x = 0; x < requiredMsgCount; x++ )
+		{
+			LOG4CXX_INFO( logger, "This is test message " << x );
+		}
+		LOGLOG_DEBUG(logLabel, "stopped");
+	}
+
+	void checkFinalBufferOutput()
+	{
+		helpers::Pool p;
+		// start a separate instance of this to write messages to the file
+		helpers::FileOutputStream output(LOG4CXX_STR("output/newdir/100message-writer.out"), false);
+		auto thisProgram = GetExecutableFileName();
+		const char* args[] = {thisProgram.c_str(), "writeFinalBufferOutput", 0};
+		apr_procattr_t* attr = NULL;
+		setTestAttributes(&attr, output.getFilePtr(), p);
+		apr_proc_t pid;
+		startTestInstance(&pid, attr, args, p);
+
+		int exitCode;
+		apr_exit_why_e reason;
+		apr_proc_wait(&pid, &exitCode, &reason, APR_WAIT);
+		if (exitCode != 0)
+		{
+			helpers::LogLog::warn(helpers::SubProcessFailure::makeMessage(LOG4CXX_STR("child"), exitCode, reason));
+		}
+		LOGUNIT_ASSERT_EQUAL(exitCode, 0);
+
+		// Check all required messages are in the file
+		std::ifstream input("output/newdir/100message.log");
+		std::vector<int> messageCount;
+		int lineCount{ 0 };
+		for (std::string line; std::getline(input, line);)
+		{
+			++lineCount;
+			 auto pos = line.rfind(' ');
+			 if (line.npos != pos && pos + 1 < line.size())
+			 {
+				try
+				{
+					auto msgNumber = std::stoull(line.substr(pos));
+					if (messageCount.size() <= msgNumber)
+						messageCount.resize(msgNumber + 1);
+					++messageCount[msgNumber];
+				}
+				catch (const std::exception& ex)
+				{
+					LogString msg;
+					helpers::Transcoder::decode(ex.what(), msg);
+					msg += LOG4CXX_STR(" processing\n");
+					helpers::Transcoder::decode(line, msg);
+					helpers::LogLog::warn(msg);
+				}
+			 }
+		}
+		LogString msg = LOG4CXX_STR("lineCount: ");
+		helpers::StringHelper::toString(lineCount, msg);
+		helpers::LogLog::debug(msg);
+		for (auto& count : messageCount)
+			LOGUNIT_ASSERT_EQUAL(count, messageCount.front());
+	}
+
+private:
+
+	void setTestAttributes(apr_procattr_t** attr, apr_file_t* output, helpers::Pool& p)
+	{
+		if (apr_procattr_create(attr, p.getAPRPool()) != APR_SUCCESS)
+		{
+			LOGUNIT_FAIL("apr_procattr_create");
+		}
+		if (apr_procattr_cmdtype_set(*attr, APR_PROGRAM_ENV) != APR_SUCCESS)
+		{
+			LOGUNIT_FAIL("apr_procattr_cmdtype_set");
+		}
+		if (apr_procattr_child_out_set(*attr, output, NULL) != APR_SUCCESS)
+		{
+			LOGUNIT_FAIL("apr_procattr_child_out_set");
+		}
+		if (apr_procattr_child_err_set(*attr, output, NULL) != APR_SUCCESS)
+		{
+			LOGUNIT_FAIL("apr_procattr_child_err_set");
+		}
+	}
+
+	void startTestInstance(apr_proc_t* pid, apr_procattr_t* attr, const char** argv, helpers::Pool& p)
+	{
+		if (apr_proc_create(pid, argv[0], argv, NULL, attr, p.getAPRPool()) != APR_SUCCESS)
+		{
+			LOGUNIT_FAIL("apr_proc_create");
+		}
+	}
+
+	std::string GetExecutableFileName()
+	{
+		auto lsProgramFilePath = spi::Configurator::properties().getProperty(LOG4CXX_STR("PROGRAM_FILE_PATH"));
+		LOG4CXX_ENCODE_CHAR(programFilePath, lsProgramFilePath);
+		return programFilePath;
 	}
 };
 

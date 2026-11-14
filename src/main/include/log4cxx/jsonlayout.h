@@ -22,13 +22,8 @@
 #include <log4cxx/helpers/iso8601dateformat.h>
 #include <log4cxx/spi/loggingevent.h>
 
-#if defined(_MSC_VER)
-	#pragma warning ( push )
-	#pragma warning ( disable: 4251 )
-#endif
 
-
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 /**
 This layout outputs events in a JSON dictionary.
@@ -36,26 +31,17 @@ This layout outputs events in a JSON dictionary.
 class LOG4CXX_EXPORT JSONLayout : public Layout
 {
 	private:
-		// Print no location info by default
-		bool locationInfo; //= false
-		bool prettyPrint; //= false
-
-		helpers::ISO8601DateFormat dateFormat;
+		LOG4CXX_DECLARE_PRIVATE_MEMBER_PTR(JSONLayoutPrivate, m_priv)
 
 	protected:
-
-		LogString ppIndentL1;
-		LogString ppIndentL2;
-
 		void appendQuotedEscapedString(LogString& buf, const LogString& input) const;
 		void appendSerializedMDC(LogString& buf,
 			const spi::LoggingEventPtr& event) const;
 		void appendSerializedNDC(LogString& buf,
 			const spi::LoggingEventPtr& event) const;
-		void appendSerializedLocationInfo(LogString& buf,
-			const spi::LoggingEventPtr& event, log4cxx::helpers::Pool& p) const;
-
+		void appendSerializedLocationInfo(LogString& buf, const spi::LoggingEventPtr& event) const;
 	public:
+		static void appendItem(const LogString& item, LogString& toAppendTo);
 		DECLARE_LOG4CXX_OBJECT(JSONLayout)
 		BEGIN_LOG4CXX_CAST_MAP()
 		LOG4CXX_CAST_ENTRY(JSONLayout)
@@ -64,6 +50,8 @@ class LOG4CXX_EXPORT JSONLayout : public Layout
 
 		JSONLayout();
 
+		~JSONLayout();
+
 		/**
 		The <b>LocationInfo</b> option takes a boolean value. By
 		default, it is set to false which means there will be no location
@@ -71,19 +59,13 @@ class LOG4CXX_EXPORT JSONLayout : public Layout
 		true, then the file name and line number of the statement
 		at the origin of the log statement will be output.
 		*/
-		inline void setLocationInfo(bool locationInfoFlag)
-		{
-			this->locationInfo = locationInfoFlag;
-		}
+		void setLocationInfo(bool locationInfoFlag);
 
 
 		/**
 		Returns the current value of the <b>LocationInfo</b> option.
 		*/
-		inline bool getLocationInfo() const
-		{
-			return locationInfo;
-		}
+		bool getLocationInfo() const;
 
 		/**
 		The <b>PrettyPrint</b> option takes a boolean value. By
@@ -92,45 +74,59 @@ class LOG4CXX_EXPORT JSONLayout : public Layout
 		then each log event will produce multiple lines, each indented
 		for readability.
 		*/
-		inline void setPrettyPrint(bool prettyPrintFlag)
-		{
-			this->prettyPrint = prettyPrintFlag;
-		}
+		void setPrettyPrint(bool prettyPrintFlag);
 
 		/**
 		Returns the current value of the <b>PrettyPrint</b> option.
 		*/
-		inline bool getPrettyPrint() const
-		{
-			return prettyPrint;
-		}
+		bool getPrettyPrint() const;
 
+		/**
+		Set thread info output mode to \c newValue.
+
+		@param newValue <code>true</code> to include a thread identifier.
+		*/
+		void setThreadInfo(bool newValue);
+
+		/**
+		Is a thread identifier included in the output?
+		*/
+		bool getThreadInfo() const;
 
 		/**
 		Returns the content type output by this layout, i.e "application/json".
 		*/
-		virtual LogString getContentType() const
-		{
-			return LOG4CXX_STR("application/json");
-		}
+		LogString getContentType() const override;
+
+		using Layout::activateOptions;
+		/**
+		\copybrief spi::OptionHandler::activateOptions()
+
+		Calculates the length of the formtted output.
+		*/
+		void activateOptions(  ) override;
 
 		/**
-		No options to activate.
-		*/
-		virtual void activateOptions(log4cxx::helpers::Pool& /* p */) {}
+		\copybrief spi::OptionHandler::setOption()
 
+		Supported options | Supported values | Default value |
+		-------------- | ---------------- | --------------- |
+		LocationInfo | True,False | false |
+		ThreadInfo | True,False | false |
+		PrettyPrint | True,False | false |
+		*/
+		void setOption(const LogString& option, const LogString& value) override;
+
+		using Layout::format;
 		/**
-		Set options
+		Append the attributes of \c event as a JSON map onto \c output.
 		*/
-		virtual void setOption(const LogString& option, const LogString& value);
-
-		virtual void format(LogString& output,
-			const spi::LoggingEventPtr& event, log4cxx::helpers::Pool& pool) const;
+		void format( LogString& output, const spi::LoggingEventPtr& event ) const override;
 
 		/**
 		The JSON layout handles the throwable contained in logging
 		events. Hence, this method return <code>false</code>.  */
-		virtual bool ignoresThrowable() const
+		bool ignoresThrowable() const override
 		{
 			return false;
 		}
@@ -138,9 +134,5 @@ class LOG4CXX_EXPORT JSONLayout : public Layout
 }; // class JSONLayout
 LOG4CXX_PTR_DEF(JSONLayout);
 }  // namespace log4cxx
-
-#if defined(_MSC_VER)
-	#pragma warning (pop)
-#endif
 
 #endif // _LOG4CXX_JSON_LAYOUT_H

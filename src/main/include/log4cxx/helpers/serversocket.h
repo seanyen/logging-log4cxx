@@ -21,27 +21,33 @@
 #include <log4cxx/helpers/socket.h>
 #include <mutex>
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 namespace helpers
 {
+
+class ServerSocket;
+LOG4CXX_PTR_DEF(ServerSocket);
+LOG4CXX_UNIQUE_PTR_DEF(ServerSocket);
+
 class LOG4CXX_EXPORT ServerSocket
 {
+	protected:
+		LOG4CXX_DECLARE_PRIVATE_MEMBER_PTR(ServerSocketPrivate, m_priv)
+		ServerSocket(LOG4CXX_PRIVATE_PTR(ServerSocketPrivate) priv);
+
 	public:
-		/**  Creates a server socket on a specified port.
-		*/
-		ServerSocket(int port);
 
 		virtual ~ServerSocket();
 
 		/** Listens for a connection to be made to this socket and
 		accepts it
 		*/
-		SocketPtr accept();
+		virtual SocketPtr accept() = 0;
 
 		/** Closes this socket.
 		*/
-		void close();
+		virtual void close();
 
 		/** Retrive setting for SO_TIMEOUT.
 		*/
@@ -51,11 +57,7 @@ class LOG4CXX_EXPORT ServerSocket
 		*/
 		void setSoTimeout(int timeout);
 
-	private:
-		Pool pool;
-		std::mutex mutex;
-		apr_socket_t* socket;
-		int timeout;
+		static ServerSocketUniquePtr create(int port, bool reuseAddress = false, const LogString& hostname = {});
 
 };
 }  // namespace helpers

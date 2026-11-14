@@ -21,12 +21,7 @@
 #include <log4cxx/spi/errorhandler.h>
 #include <log4cxx/helpers/object.h>
 
-#ifdef _MSC_VER
-	#pragma warning ( push )
-	#pragma warning (disable : 4251) // ::std::exception needs to have dll-interface
-#endif
-
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 namespace helpers
 {
@@ -40,71 +35,42 @@ first error in an appender and ignoring all following errors.
 <p>This policy aims at protecting an otherwise working application
 from being flooded with error messages when logging fails
 */
-class LOG4CXX_EXPORT OnlyOnceErrorHandler :
-	public virtual spi::ErrorHandler,
-	public virtual Object
+class LOG4CXX_EXPORT OnlyOnceErrorHandler
+	: public spi::ErrorHandler
 {
 	private:
-		LogString WARN_PREFIX;
-		LogString ERROR_PREFIX;
-		mutable bool firstTime;
+		LOG4CXX_DECLARE_PRIVATE_MEMBER_PTR(OnlyOnceErrorHandlerPrivate, m_priv)
 
 	public:
 		DECLARE_LOG4CXX_OBJECT(OnlyOnceErrorHandler)
 		BEGIN_LOG4CXX_CAST_MAP()
-		LOG4CXX_CAST_ENTRY(spi::OptionHandler)
-		LOG4CXX_CAST_ENTRY(spi::ErrorHandler)
+		LOG4CXX_CAST_ENTRY(OnlyOnceErrorHandler)
+		LOG4CXX_CAST_ENTRY_CHAIN(spi::ErrorHandler)
 		END_LOG4CXX_CAST_MAP()
 
 		OnlyOnceErrorHandler();
 
-		/**
-		 Does not do anything.
-		 */
-		void setLogger(const LoggerPtr& logger);
+		~OnlyOnceErrorHandler();
 
-
-		/**
-		No options to activate.
+		/** On the first call to this, writes \c context and \c e to stderr .
 		*/
-		void activateOptions(log4cxx::helpers::Pool& p);
-		void setOption(const LogString& option, const LogString& value);
+		void error
+			( const LogString&      context
+			, const std::exception& e
+			, spi::ErrorCode        category = spi::ErrorCode::GENERIC_FAILURE
+			) override;
 
-
-		/**
-		Prints the message and the stack trace of the exception on
-		<code>System.err</code>.  */
-		void error(const LogString& message, const std::exception& e,
-			int errorCode) const;
-		/**
-		Prints the message and the stack trace of the exception on
-		<code>System.err</code>.
+		/** On the first call to this, writes \c message to stderr .
 		*/
-		void error(const LogString& message, const std::exception& e,
-			int errorCode, const spi::LoggingEventPtr& event) const;
+		void error(const LogString& message, spi::ErrorCode category = spi::ErrorCode::INVALID_CONFIGURATION) override;
 
 		/**
-		Print a the error message passed as parameter on
-		<code>System.err</code>.
+		Has an error been reported?
 		*/
-		void error(const LogString& message) const;
-
-		/**
-		Does not do anything.
-		*/
-		void setAppender(const AppenderPtr& appender);
-
-		/**
-		Does not do anything.
-		*/
-		void setBackupAppender(const AppenderPtr& appender);
+		bool errorReported() const override;
 };
 }  // namespace helpers
 } // namespace log4cxx
-
-#if defined(_MSC_VER)
-	#pragma warning (pop)
-#endif
 
 #endif //_LOG4CXX_HELPERS_ONLY_ONCE_ERROR_HANDLER_H
 

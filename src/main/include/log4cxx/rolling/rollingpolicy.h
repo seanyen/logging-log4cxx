@@ -18,12 +18,11 @@
 #if !defined(_LOG4CXX_ROLLING_ROLLING_POLICY_H)
 #define _LOG4CXX_ROLLING_ROLLING_POLICY_H
 
-#include <log4cxx/portability.h>
 #include <log4cxx/spi/optionhandler.h>
 #include <log4cxx/rolling/rolloverdescription.h>
 #include <log4cxx/file.h>
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 namespace rolling
 {
@@ -52,15 +51,15 @@ class LOG4CXX_EXPORT RollingPolicy :
 		 *
 		 * @param currentActiveFile current value of RollingFileAppender.getFile().
 		 * @param append current value of RollingFileAppender.getAppend().
-		 * @param pool pool for memory allocations during call.
 		 * @return Description of the initialization, may be null to indicate
 		 * no initialization needed.
-		 * @throws SecurityException if denied access to log files.
 		 */
-		virtual RolloverDescriptionPtr initialize(
-			const   LogString&              currentActiveFile,
-			const   bool                    append,
-			log4cxx::helpers::Pool& pool) = 0;
+		virtual RolloverDescriptionPtr initialize(const LogString& currentActiveFile, bool append) = 0;
+		/**
+		@deprecated Backward compatability support will be removed in a future version.
+		*/
+		[[deprecated("Use initialize() without a Pool parameter instead")]]
+		RolloverDescriptionPtr initialize(const LogString& currentActiveFile, bool append, helpers::Pool& pool);
 
 		/**
 		 * Prepare for a rollover.  This method is called prior to
@@ -70,15 +69,15 @@ class LOG4CXX_EXPORT RollingPolicy :
 		 *
 		 * @param currentActiveFile file name for current active log file.
 		 * @param append current value of the parent FileAppender.getAppend().
-		 * @param pool pool for memory allocations during call.
 		 * @return Description of pending rollover, may be null to indicate no rollover
 		 * at this time.
-		 * @throws SecurityException if denied access to log files.
 		 */
-		virtual RolloverDescriptionPtr rollover(
-			const   LogString&              currentActiveFile,
-			const   bool                    append,
-			log4cxx::helpers::Pool& pool) = 0;
+		virtual RolloverDescriptionPtr rollover(const LogString& currentActiveFile, bool append) = 0;
+		/**
+		@deprecated Backward compatability support will be removed in a future version.
+		*/
+		[[deprecated("Use rollover() without a Pool parameter instead")]]
+		RolloverDescriptionPtr rollover(const LogString& currentActiveFile, bool append, helpers::Pool& pool);
 };
 
 LOG4CXX_PTR_DEF(RollingPolicy);

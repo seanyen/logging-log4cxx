@@ -20,7 +20,7 @@
 
 #include <log4cxx/pattern/namepatternconverter.h>
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 namespace pattern
 {
@@ -35,20 +35,14 @@ namespace pattern
  */
 class LOG4CXX_EXPORT LoggerPatternConverter : public NamePatternConverter
 {
-
-		/**
-		 * Private constructor.
-		 * @param options options, may be null.
-		 * @param logger logger for diagnostic messages, may be null.
-		 */
-		LoggerPatternConverter(const std::vector<LogString>& options);
-
 	public:
 		DECLARE_LOG4CXX_PATTERN(LoggerPatternConverter)
 		BEGIN_LOG4CXX_CAST_MAP()
 		LOG4CXX_CAST_ENTRY(LoggerPatternConverter)
 		LOG4CXX_CAST_ENTRY_CHAIN(NamePatternConverter)
 		END_LOG4CXX_CAST_MAP()
+
+		LoggerPatternConverter(const std::vector<LogString>& options);
 
 		/**
 		 * Obtains an instance of pattern converter.
@@ -60,9 +54,7 @@ class LOG4CXX_EXPORT LoggerPatternConverter : public NamePatternConverter
 
 		using NamePatternConverter::format;
 
-		void format(const log4cxx::spi::LoggingEventPtr& event,
-			LogString& toAppendTo,
-			log4cxx::helpers::Pool& p) const;
+		void format( const spi::LoggingEventPtr& event, LogString& toAppendTo ) const override;
 };
 
 }

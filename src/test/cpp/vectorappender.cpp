@@ -16,6 +16,7 @@
  */
 
 #include "vectorappender.h"
+#include <log4cxx/private/appenderskeleton_priv.h>
 #include <thread>
 
 using namespace log4cxx;
@@ -23,19 +24,48 @@ using namespace log4cxx::helpers;
 
 IMPLEMENT_LOG4CXX_OBJECT(VectorAppender)
 
-void VectorAppender::append(const spi::LoggingEventPtr& event, Pool& /*p*/)
+void VectorAppender::append( const spi::LoggingEventPtr& event )
 {
-	std::this_thread::sleep_for( std::chrono::milliseconds( 100 ) );
-
-	vector.push_back(event);
+	if (0 < this->appendMillisecondDelay)
+		std::this_thread::sleep_for( std::chrono::milliseconds( this->appendMillisecondDelay ) );
+	std::lock_guard<std::mutex> lock(this->vectorMutex);
+	this->vector.push_back(event);
+	this->vectorNotEmpty.notify_one();
 }
 
-void VectorAppender::close()
+bool VectorAppender::isClosed() const
 {
-	if (this->closed)
-	{
-		return;
-	}
+	return m_priv->closed;
+}
 
-	this->closed = true;
+auto VectorAppender::getVector() const -> std::vector<spi::LoggingEventPtr>
+{
+	std::lock_guard<std::mutex> lock(this->vectorMutex);
+	return this->vector;
+}
+
+auto VectorAppender::getEvent(int eventNumber) const -> spi::LoggingEventPtr
+{
+	std::lock_guard<std::mutex> lock(this->vectorMutex);
+	spi::LoggingEventPtr result;
+	if (0 < eventNumber && eventNumber <= this->vector.size())
+		result = this->vector[eventNumber - 1];
+	return result;
+}
+
+int VectorAppender::getEventCount() const
+{
+	std::lock_guard<std::mutex> lock(this->vectorMutex);
+	return static_cast<int>(this->vector.size());
+}
+
+bool VectorAppender::waitForEventCount(size_t requiredEventCount, const Period& delay)
+{
+	std::unique_lock<std::mutex> lock(this->vectorMutex);
+	return this->vectorNotEmpty.wait_for
+		( lock
+		, delay
+		, [this, requiredEventCount]() -> bool
+			{ return requiredEventCount <= this->vector.size(); }
+		);
 }

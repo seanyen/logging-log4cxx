@@ -15,21 +15,15 @@
  * limitations under the License.
  */
 
-#if defined(_MSC_VER)
-	#pragma warning ( disable: 4231 4251 4275 4786 )
-#endif
-
-
-
 #include <log4cxx/logstring.h>
 #include <log4cxx/pattern/ndcpatternconverter.h>
 #include <log4cxx/spi/loggingevent.h>
 #include <log4cxx/spi/location/locationinfo.h>
 
-using namespace log4cxx;
-using namespace log4cxx::pattern;
-using namespace log4cxx::spi;
-using namespace log4cxx::helpers;
+using namespace LOG4CXX_NS;
+using namespace LOG4CXX_NS::pattern;
+using namespace LOG4CXX_NS::spi;
+using namespace LOG4CXX_NS::helpers;
 
 IMPLEMENT_LOG4CXX_OBJECT(NDCPatternConverter)
 
@@ -42,16 +36,21 @@ NDCPatternConverter::NDCPatternConverter() :
 PatternConverterPtr NDCPatternConverter::newInstance(
 	const std::vector<LogString>& /* options */)
 {
-	static PatternConverterPtr def(new NDCPatternConverter());
-	return def;
+	return std::make_shared<NDCPatternConverter>();
 }
 
-void NDCPatternConverter::format(
-	const LoggingEventPtr& event,
-	LogString& toAppendTo,
-	Pool& /* p */) const
+void NDCPatternConverter::format( const spi::LoggingEventPtr& event, LogString& toAppendTo ) const
 {
-	if (!event->getNDC(toAppendTo))
+	LogString value;
+	if (event->getNDC(value))
+	{
+		auto& info = getFormattingInfo();
+		if (info.getMaxLength() < value.length())
+			toAppendTo.append(value.substr(value.length() - info.getMaxLength()));
+		else
+			toAppendTo.append(value);
+	}
+	else
 	{
 		toAppendTo.append(LOG4CXX_STR("null"));
 	}

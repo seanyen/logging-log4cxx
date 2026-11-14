@@ -19,9 +19,8 @@
 #define _LOG4CXX_HELPERS_CHARSETENCODER_H
 
 #include <log4cxx/helpers/object.h>
-#include <log4cxx/helpers/pool.h>
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 
 namespace helpers
@@ -31,8 +30,8 @@ class CharsetEncoder;
 LOG4CXX_PTR_DEF(CharsetEncoder);
 
 /**
-*   An engine to transform LogStrings into bytes
-*     for the specific character set.
+*   An abstract base for classes that transform LogString codepoints
+*     to the byte sequence representation of the codepoints.
 */
 class LOG4CXX_EXPORT CharsetEncoder : public Object
 {
@@ -75,37 +74,38 @@ class LOG4CXX_EXPORT CharsetEncoder : public Object
 		static CharsetEncoderPtr getUTF8Encoder();
 
 		/**
-		* Encodes a string replacing unmappable
-		* characters with escape sequences.
-		*
-		*/
+		 * Use \c enc to encode into \c out codepoints of \c src until \c out is full or an invalid value is encountered.
+		 * If encoding is stopped by an invalid value,
+		 * a replacement character is added to \c out
+		 * and \c iter is advanced past the invalid value.
+		 * @pre \c iter is a valid, dereferenceable iterator.
+		 * @pre \c iter and the end of \c src are in the same sequence.
+		 */
 		static void encode(CharsetEncoderPtr& enc,
 			const LogString& src,
 			LogString::const_iterator& iter,
 			ByteBuffer& dst);
 
 		/**
-		 * Encodes as many characters from the input string as possible
-		 *   to the output buffer.
-		     *  @param in input string
-		 *  @param iter position in string to start.
-		 *  @param out output buffer.
-		 *  @return APR_SUCCESS unless a character can not be represented in
-		 *    the encoding.
+		 * Encode into \c out codepoints of \c in until \c out is full or an invalid value is encountered.
+		 *   @pre \c iter is a valid, dereferenceable iterator.
+		 *   @pre \c iter and the end of \c in are in the same sequence.
+		 *   @return APR_SUCCESS unless an invalid value is encountered
 		 */
 		virtual log4cxx_status_t encode(const LogString& in,
 			LogString::const_iterator& iter,
 			ByteBuffer& out) = 0;
 
 		/**
+		 * Add onto \c out an encoded equivalent of \c codePoint.
+		 * @return APR_SUCCESS unless \c codePoint cannot be represented by this charset or \c out is full.
+		 */
+		virtual log4cxx_status_t encode(unsigned int codePoint, ByteBuffer& out) = 0;
+		/**
 		 *   Resets any internal state.
 		 */
 		virtual void reset();
 
-		/**
-		 *   Flushes the encoder.
-		 */
-		virtual void flush(ByteBuffer& out);
 
 		/**
 		 *   Determines if the return value from encode indicates
@@ -116,7 +116,35 @@ class LOG4CXX_EXPORT CharsetEncoder : public Object
 			return (stat != 0);
 		}
 
+		/**
+		* Is the data of \c src unchanged by \c enc.
+		*
+		*/
+		static bool isTriviallyCopyable(const LogString& src, const CharsetEncoderPtr& enc);
 
+		/**
+		 *  Add UTF-8 bytes to \c dst corresponding to \c ch.
+		 *  @pre dst is a writable address for 4 consecutive bytes
+		 *  @param ch the code point value.
+		 *  @param dst storage for upto 4 bytes.
+		 */
+		static size_t putUTF8CodePoint(unsigned int ch, char* dst);
+
+		/**
+		 *  Add UTF-16 big-endian bytes to \c dst corresponding to \c ch.
+		 *  @pre dst is a writable address for 4 consecutive bytes
+		 *  @param ch the code point value.
+		 *  @param dst storage for upto 4 bytes.
+		 */
+		static size_t putUTF16BECodePoint(unsigned int ch, char* dst);
+
+		/**
+		 *  Add UTF-16 little-endian bytes to \c dst corresponding to \c ch.
+		 *  @pre dst is a writable address for 4 consecutive bytes
+		 *  @param ch the code point value.
+		 *  @param dst storage for upto 4 bytes.
+		 */
+		static size_t putUTF16LECodePoint(unsigned int ch, char* dst);
 	private:
 		/**
 		*   Private copy constructor.

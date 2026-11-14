@@ -15,20 +15,63 @@
  * limitations under the License.
  */
 #define __STDC_CONSTANT_MACROS
+#define NOMINMAX /* tell wnidows not to define min/max macros */
 #include <log4cxx/logstring.h>
 #include <log4cxx/helpers/cacheddateformat.h>
-
-
-#include <apr_time.h>
 #include <log4cxx/helpers/pool.h>
 #include <limits>
 #include <log4cxx/helpers/exception.h>
 
-using namespace log4cxx;
-using namespace log4cxx::helpers;
-using namespace log4cxx::pattern;
+using namespace LOG4CXX_NS;
+using namespace LOG4CXX_NS::helpers;
+using namespace LOG4CXX_NS::pattern;
+
+struct CachedDateFormat::CachedDateFormatPriv
+{
+	CachedDateFormatPriv(const DateFormatPtr& dateFormat, int expiration1) :
+		formatter(dateFormat),
+		millisecondStart(0),
+		slotBegin(std::numeric_limits<log4cxx_time_t>::min()),
+		cache(50, 0x20),
+		expiration(expiration1),
+		previousTime(std::numeric_limits<log4cxx_time_t>::min())
+	{}
+
+	/**
+	 *   Wrapped formatter.
+	 */
+	LOG4CXX_NS::helpers::DateFormatPtr formatter;
+
+	/**
+	 *  Index of initial digit of millisecond pattern or
+	 *   UNRECOGNIZED_MILLISECONDS or NO_MILLISECONDS.
+	 */
+	mutable int millisecondStart;
+
+	/**
+	 *  Integral second preceding the previous convered Date.
+	 */
+	mutable log4cxx_time_t slotBegin;
 
 
+	/**
+	 *  Cache of previous conversion.
+	 */
+	mutable LogString cache;
+
+
+	/**
+	 *  Maximum validity period for the cache.
+	 *  Typically 1, use cache for duplicate requests only, or
+	 *  1000000, use cache for requests within the same integral second.
+	 */
+	const int expiration;
+
+	/**
+	 *  Date requested in previous conversion.
+	 */
+	mutable log4cxx_time_t previousTime;
+};
 
 
 /**
@@ -71,8 +114,6 @@ const logchar CachedDateFormat::magicString2[] = { 0x39, 0x38, 0x37, 0};
  */
 const logchar CachedDateFormat::zeroString[] = { 0x30, 0x30, 0x30, 0 };
 
-#undef min
-
 /**
  *  Creates a new CachedDateFormat object.
  *  @param dateFormat Date format, may not be null.
@@ -83,16 +124,11 @@ const logchar CachedDateFormat::zeroString[] = { 0x30, 0x30, 0x30, 0 };
  */
 CachedDateFormat::CachedDateFormat(const DateFormatPtr& dateFormat,
 	int expiration1) :
-	formatter(dateFormat),
-	millisecondStart(0),
-	slotBegin(std::numeric_limits<log4cxx_time_t>::min()),
-	cache(50, 0x20),
-	expiration(expiration1),
-	previousTime(std::numeric_limits<log4cxx_time_t>::min())
+	m_priv(std::make_unique<CachedDateFormatPriv>(dateFormat, expiration1))
 {
 	if (dateFormat == NULL)
 	{
-		throw IllegalArgumentException(LOG4CXX_STR("dateFormat cannot be null"));
+		throw NullPointerException(LOG4CXX_STR("dateFormat"));
 	}
 
 	if (expiration1 < 0)
@@ -100,6 +136,8 @@ CachedDateFormat::CachedDateFormat(const DateFormatPtr& dateFormat,
 		throw IllegalArgumentException(LOG4CXX_STR("expiration must be non-negative"));
 	}
 }
+
+CachedDateFormat::~CachedDateFormat() {}
 
 
 /**
@@ -113,11 +151,10 @@ CachedDateFormat::CachedDateFormat(const DateFormatPtr& dateFormat,
  */
 int CachedDateFormat::findMillisecondStart(
 	log4cxx_time_t time, const LogString& formatted,
-	const DateFormatPtr& formatter,
-	Pool& pool)
+	const DateFormatPtr& formatter)
 {
 
-	apr_time_t slotBegin = (time / 1000000) * 1000000;
+	log4cxx_time_t slotBegin = (time / 1000000) * 1000000;
 
 	if (slotBegin > time)
 	{
@@ -137,7 +174,7 @@ int CachedDateFormat::findMillisecondStart(
 	}
 
 	LogString plusMagic;
-	formatter->format(plusMagic, slotBegin + magic, pool);
+	formatter->format(plusMagic, slotBegin + magic);
 
 	/**
 	 *   If the string lengths differ then
@@ -161,7 +198,7 @@ int CachedDateFormat::findMillisecondStart(
 				millisecondFormat(millis, formattedMillis, 0);
 
 				LogString plusZero;
-				formatter->format(plusZero, slotBegin, pool);
+				formatter->format(plusZero, slotBegin);
 
 				// Test if the next 1..3 characters match the magic string, main problem is that magic
 				// available millis in formatted can overlap. Therefore the current i is not always the
@@ -195,23 +232,22 @@ int CachedDateFormat::findMillisecondStart(
 	return NO_MILLISECONDS;
 }
 
-
 /**
  * Formats a millisecond count into a date/time string.
  *
  *  @param now Number of milliseconds after midnight 1 Jan 1970 GMT.
  *  @param sbuf the string buffer to write to
  */
-void CachedDateFormat::format(LogString& buf, log4cxx_time_t now, Pool& p) const
+void CachedDateFormat::format( LogString& toAppendTo, log4cxx_time_t tm ) const
 {
 
 	//
 	// If the current requested time is identical to the previously
 	//     requested time, then append the cache contents.
 	//
-	if (now == previousTime)
+	if (tm == m_priv->previousTime)
 	{
-		buf.append(cache);
+		toAppendTo.append(m_priv->cache);
 		return;
 	}
 
@@ -219,28 +255,28 @@ void CachedDateFormat::format(LogString& buf, log4cxx_time_t now, Pool& p) const
 	//   If millisecond pattern was not unrecognized
 	//     (that is if it was found or milliseconds did not appear)
 	//
-	if (millisecondStart != UNRECOGNIZED_MILLISECONDS)
+	if (m_priv->millisecondStart != UNRECOGNIZED_MILLISECONDS)
 	{
 		//    Check if the cache is still valid.
 		//    If the requested time is within the same integral second
 		//       as the last request and a shorter expiration was not requested.
-		if (now < slotBegin + expiration
-			&& now >= slotBegin
-			&& now < slotBegin + 1000000L)
+		if (tm < m_priv->slotBegin + m_priv->expiration
+			&& tm >= m_priv->slotBegin
+			&& tm < m_priv->slotBegin + 1000000L)
 		{
 			//
 			//    if there was a millisecond field then update it
 			//
-			if (millisecondStart >= 0)
+			if (m_priv->millisecondStart >= 0)
 			{
-				millisecondFormat((int) ((now - slotBegin) / 1000), cache, millisecondStart);
+				millisecondFormat((int) ((tm - m_priv->slotBegin) / 1000), m_priv->cache, m_priv->millisecondStart);
 			}
 
 			//
 			//   update the previously requested time
 			//      (the slot begin should be unchanged)
-			previousTime = now;
-			buf.append(cache);
+			m_priv->previousTime = tm;
+			toAppendTo.append(m_priv->cache);
 
 			return;
 		}
@@ -249,24 +285,24 @@ void CachedDateFormat::format(LogString& buf, log4cxx_time_t now, Pool& p) const
 	//
 	//  could not use previous value.
 	//    Call underlying formatter to format date.
-	cache.erase(cache.begin(), cache.end());
-	formatter->format(cache, now, p);
-	buf.append(cache);
-	previousTime = now;
-	slotBegin = (previousTime / 1000000) * 1000000;
+	m_priv->cache.erase(m_priv->cache.begin(), m_priv->cache.end());
+	m_priv->formatter->format(m_priv->cache, tm);
+	toAppendTo.append(m_priv->cache);
+	m_priv->previousTime = tm;
+	m_priv->slotBegin = (m_priv->previousTime / 1000000) * 1000000;
 
-	if (slotBegin > previousTime)
+	if (m_priv->slotBegin > m_priv->previousTime)
 	{
-		slotBegin -= 1000000;
+		m_priv->slotBegin -= 1000000;
 	}
 
 	//
 	//    if the milliseconds field was previous found
 	//       then reevaluate in case it moved.
 	//
-	if (millisecondStart >= 0)
+	if (m_priv->millisecondStart >= 0)
 	{
-		millisecondStart = findMillisecondStart(now, cache, formatter, p);
+		m_priv->millisecondStart = findMillisecondStart(tm, m_priv->cache, m_priv->formatter);
 	}
 }
 
@@ -295,16 +331,16 @@ void CachedDateFormat::millisecondFormat(int millis,
  */
 void CachedDateFormat::setTimeZone(const TimeZonePtr& timeZone)
 {
-	formatter->setTimeZone(timeZone);
-	previousTime = std::numeric_limits<log4cxx_time_t>::min();
-	slotBegin = std::numeric_limits<log4cxx_time_t>::min();
+	m_priv->formatter->setTimeZone(timeZone);
+	m_priv->previousTime = std::numeric_limits<log4cxx_time_t>::min();
+	m_priv->slotBegin = std::numeric_limits<log4cxx_time_t>::min();
 }
 
 
 
-void CachedDateFormat::numberFormat(LogString& s, int n, Pool& p) const
+void CachedDateFormat::numberFormat( LogString& toAppendTo, int n ) const
 {
-	formatter->numberFormat(s, n, p);
+	m_priv->formatter->numberFormat(toAppendTo, n);
 }
 
 

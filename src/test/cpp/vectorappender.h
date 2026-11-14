@@ -18,8 +18,11 @@
 #include <log4cxx/appenderskeleton.h>
 #include <vector>
 #include <log4cxx/spi/loggingevent.h>
+#include <mutex>
+#include <condition_variable>
+#include <chrono>
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 
 
@@ -28,6 +31,10 @@ An appender that appends logging events to a vector.
 */
 class VectorAppender : public AppenderSkeleton
 {
+		std::vector<spi::LoggingEventPtr> vector;
+		mutable std::mutex                vectorMutex;
+		std::condition_variable           vectorNotEmpty;
+		int                               appendMillisecondDelay = 0;
 	public:
 		DECLARE_LOG4CXX_OBJECT(VectorAppender)
 		BEGIN_LOG4CXX_CAST_MAP()
@@ -35,31 +42,28 @@ class VectorAppender : public AppenderSkeleton
 		LOG4CXX_CAST_ENTRY_CHAIN(AppenderSkeleton)
 		END_LOG4CXX_CAST_MAP()
 
-		std::vector<spi::LoggingEventPtr> vector;
-
-
 		/**
 		This method is called by the AppenderSkeleton#doAppend
 		method.
 		*/
-		void append(const spi::LoggingEventPtr& event, log4cxx::helpers::Pool& p);
+		void append( const spi::LoggingEventPtr& event ) override;
 
-		const std::vector<spi::LoggingEventPtr>& getVector() const
+		std::vector<spi::LoggingEventPtr> getVector() const;
+
+		spi::LoggingEventPtr getEvent(int eventNumber) const;
+
+		int getEventCount() const;
+
+		bool isClosed() const;
+
+		void setMillisecondDelay(int milliseconds)
 		{
-			return vector;
+			this->appendMillisecondDelay = milliseconds;
 		}
 
-		void close();
+		using Period = std::chrono::milliseconds;
+		bool waitForEventCount(size_t requiredEventCount, const Period& delay);
 
-		bool isClosed() const
-		{
-			return closed;
-		}
-
-		bool requiresLayout() const
-		{
-			return false;
-		}
 };
 typedef std::shared_ptr<VectorAppender> VectorAppenderPtr;
 }

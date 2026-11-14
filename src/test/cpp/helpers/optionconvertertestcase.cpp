@@ -20,6 +20,10 @@
 #include <log4cxx/helpers/system.h>
 #include <log4cxx/helpers/transcoder.h>
 #include <log4cxx/helpers/pool.h>
+#include <log4cxx/helpers/loglog.h>
+#include <log4cxx/helpers/stringhelper.h>
+#include <log4cxx/file.h>
+#include <log4cxx/hierarchy.h>
 #include "../testchar.h"
 #include "../insertwide.h"
 #include "../logunit.h"
@@ -28,6 +32,7 @@
 #include <apr_file_io.h>
 #include <apr_user.h>
 #include <apr_env.h>
+#include <limits>
 
 
 using namespace log4cxx;
@@ -44,6 +49,16 @@ LOGUNIT_CLASS(OptionConverterTestCase)
 	LOGUNIT_TEST(varSubstTest3);
 	LOGUNIT_TEST(varSubstTest4);
 	LOGUNIT_TEST(varSubstTest5);
+	LOGUNIT_TEST(varSubstRecursiveReferenceTest);
+	LOGUNIT_TEST(toIntReturnsDefaultOnOverflow);
+	LOGUNIT_TEST(toIntReturnsDefaultOnMalformedInput);
+	LOGUNIT_TEST(toFileSizeAcceptsValidValues);
+	LOGUNIT_TEST(toFileSizeAcceptsWhitespaceSeparatedValues);
+	LOGUNIT_TEST(toFileSizeAcceptsLowercaseSuffixes);
+	LOGUNIT_TEST(toFileSizeReturnsDefaultOnMalformedInput);
+	LOGUNIT_TEST(toFileSizeReturnsDefaultOnOverflow);
+	LOGUNIT_TEST(toFileSizeBoundaryValues);
+	LOGUNIT_TEST(selectAndConfigureWithUnknownConfiguratorClass);
 	LOGUNIT_TEST(testTmpDir);
 #if APR_HAS_USER
 	LOGUNIT_TEST(testUserHome);
@@ -127,7 +142,7 @@ public:
 		{
 			res = OptionConverter::substVars(val, nullProperties);
 		}
-		catch (IllegalArgumentException& e)
+		catch (const IllegalArgumentException& e)
 		{
 			std::string witness("\"Test4 ${incomplete \" has no closing brace. Opening brace at position 6.");
 			LOGUNIT_ASSERT_EQUAL(witness, (std::string) e.what());
@@ -142,6 +157,132 @@ public:
 		props1.setProperty(LOG4CXX_STR("p2"), LOG4CXX_STR("${p1}"));
 		LogString res = OptionConverter::substVars(LOG4CXX_STR("${p2}"), props1);
 		LOGUNIT_ASSERT_EQUAL((LogString) LOG4CXX_STR("x1"), res);
+	}
+
+	void varSubstRecursiveReferenceTest()
+	{
+		Properties props;
+		props.setProperty(LOG4CXX_STR("p1"), LOG4CXX_STR("${p2}"));
+		props.setProperty(LOG4CXX_STR("p2"), LOG4CXX_STR("${p1}"));
+		try
+		{
+			OptionConverter::substVars(LOG4CXX_STR("${p1}"), props);
+			LOGUNIT_ASSERT(false);
+		}
+		catch (const IllegalArgumentException& ex)
+		{
+			LOG4CXX_DECODE_CHAR(lsMsg, ex.what());
+			LogLog::debug(lsMsg);
+		}
+	}
+
+	void toIntReturnsDefaultOnOverflow()
+	{
+		const int defaultValue = 7;
+		LOGUNIT_ASSERT_EQUAL(defaultValue, OptionConverter::toInt(LOG4CXX_STR("9999999999999999999999"), defaultValue));
+		LOGUNIT_ASSERT_EQUAL(defaultValue, OptionConverter::toInt(LOG4CXX_STR("-9999999999999999999999"), defaultValue));
+		LOGUNIT_ASSERT_EQUAL(defaultValue, OptionConverter::toInt(LOG4CXX_STR("2147483648"), defaultValue));
+		LOGUNIT_ASSERT_EQUAL(defaultValue, OptionConverter::toInt(LOG4CXX_STR("-2147483649"), defaultValue));
+	}
+
+	void toIntReturnsDefaultOnMalformedInput()
+	{
+		const int defaultValue = 7;
+		LOGUNIT_ASSERT_EQUAL(defaultValue, OptionConverter::toInt(LOG4CXX_STR("not-a-number"), defaultValue));
+		LOGUNIT_ASSERT_EQUAL(defaultValue, OptionConverter::toInt(LOG4CXX_STR("123abc"), defaultValue));
+		LOGUNIT_ASSERT_EQUAL(defaultValue, OptionConverter::toInt(LOG4CXX_STR("42xyz"), defaultValue));
+		LOGUNIT_ASSERT_EQUAL(defaultValue, OptionConverter::toInt(LOG4CXX_STR(""), defaultValue));
+		LOGUNIT_ASSERT_EQUAL((std::numeric_limits<int>::max)(), OptionConverter::toInt(LOG4CXX_STR("2147483647"), defaultValue));
+		LOGUNIT_ASSERT_EQUAL((std::numeric_limits<int>::min)(), OptionConverter::toInt(LOG4CXX_STR("-2147483648"), defaultValue));
+	}
+
+	void toFileSizeAcceptsValidValues()
+	{
+		const size_t tenBytesExpected = 10LL;
+		const size_t tenKBExpected = 10LL * 1024LL;
+		const size_t tenMBExpected = 10LL * 1024LL * 1024LL;
+		LOGUNIT_ASSERT_EQUAL(tenBytesExpected, OptionConverter::toFileSize(LOG4CXX_STR("10"), 7));
+		LOGUNIT_ASSERT_EQUAL(tenBytesExpected, OptionConverter::toFileSize(LOG4CXX_STR("10B"), 7));
+		LOGUNIT_ASSERT_EQUAL(tenKBExpected, OptionConverter::toFileSize(LOG4CXX_STR("10 KB"), 7));
+		LOGUNIT_ASSERT_EQUAL(tenMBExpected, OptionConverter::toFileSize(LOG4CXX_STR("10MB"), 7));
+	}
+
+	void toFileSizeAcceptsWhitespaceSeparatedValues()
+	{
+		const size_t tenBytesExpected = 10LL;
+		LOGUNIT_ASSERT_EQUAL(tenBytesExpected, OptionConverter::toFileSize(LOG4CXX_STR("10 B"), 7));
+		const size_t tenKBExpected = 10LL * 1024LL;
+		LOGUNIT_ASSERT_EQUAL(tenKBExpected, OptionConverter::toFileSize(LOG4CXX_STR("10 KB"), 7));
+		const size_t tenMBExpected = 10LL * 1024LL * 1024LL;
+		LOGUNIT_ASSERT_EQUAL(tenMBExpected, OptionConverter::toFileSize(LOG4CXX_STR("10   MB"), 7));
+		const size_t tenGBExpected = 10LL * 1024LL * 1024LL * 1024LL;
+		LOGUNIT_ASSERT_EQUAL(tenGBExpected, OptionConverter::toFileSize(LOG4CXX_STR("10GB   "), 7));
+	}
+
+	void toFileSizeAcceptsLowercaseSuffixes()
+	{
+		const size_t tenKBExpected = 10LL * 1024LL;
+		LOGUNIT_ASSERT_EQUAL(tenKBExpected, OptionConverter::toFileSize(LOG4CXX_STR("10kb"), 7));
+		const size_t tenMBExpected = 10LL * 1024LL * 1024LL;
+		LOGUNIT_ASSERT_EQUAL(tenMBExpected, OptionConverter::toFileSize(LOG4CXX_STR("10mb"), 7));
+		const size_t tenGBExpected = 10LL * 1024LL * 1024LL * 1024LL;
+		LOGUNIT_ASSERT_EQUAL(tenGBExpected, OptionConverter::toFileSize(LOG4CXX_STR("10gb"), 7));
+	}
+
+	void toFileSizeReturnsDefaultOnMalformedInput()
+	{
+		const size_t defaultValue = 7;
+		LOGUNIT_ASSERT_EQUAL(defaultValue, OptionConverter::toFileSize(LOG4CXX_STR("not-a-size"), defaultValue));
+		LOGUNIT_ASSERT_EQUAL(defaultValue, OptionConverter::toFileSize(LOG4CXX_STR("123abc"), defaultValue));
+		LOGUNIT_ASSERT_EQUAL(defaultValue, OptionConverter::toFileSize(LOG4CXX_STR("10XB"), defaultValue));
+		LOGUNIT_ASSERT_EQUAL(defaultValue, OptionConverter::toFileSize(LOG4CXX_STR("10QB"), defaultValue));
+		LOGUNIT_ASSERT_EQUAL(defaultValue, OptionConverter::toFileSize(LOG4CXX_STR("10K"), defaultValue));
+		LOGUNIT_ASSERT_EQUAL(defaultValue, OptionConverter::toFileSize(LOG4CXX_STR("10MBjunk"), defaultValue));
+		LOGUNIT_ASSERT_EQUAL(defaultValue, OptionConverter::toFileSize(LOG4CXX_STR("10 B junk"), defaultValue));
+		LOGUNIT_ASSERT_EQUAL(defaultValue, OptionConverter::toFileSize(LOG4CXX_STR("-1MB"), defaultValue));
+	}
+
+	void toFileSizeReturnsDefaultOnOverflow()
+	{
+		const size_t defaultValue = 7;
+		LOGUNIT_ASSERT_EQUAL(defaultValue, OptionConverter::toFileSize(LOG4CXX_STR("9999999999999999999999"), defaultValue));
+		LOGUNIT_ASSERT_EQUAL(defaultValue, OptionConverter::toFileSize(LOG4CXX_STR("9999999999999999999999GB"), defaultValue));
+	}
+
+	void toFileSizeBoundaryValues()
+	{
+		const size_t defaultValue = 7;
+		auto maxLongString = std::to_string((std::numeric_limits<long>::max)());
+		LOG4CXX_DECODE_CHAR(lsMaxLong, maxLongString);
+		const size_t expectedValue = (std::numeric_limits<long>::max)();
+		LOGUNIT_ASSERT_EQUAL(expectedValue, OptionConverter::toFileSize(lsMaxLong, defaultValue));
+
+		const size_t onePastMaxInt = static_cast<size_t>((std::numeric_limits<int>::max)()) + 1;
+		LogString lsOnePastMaxInt;
+		StringHelper::toString(onePastMaxInt, lsOnePastMaxInt);
+		LOGUNIT_ASSERT_EQUAL(onePastMaxInt, OptionConverter::toFileSize(lsOnePastMaxInt, defaultValue));
+
+		const size_t overflowBase = static_cast<size_t>((std::numeric_limits<size_t>::max)() / (1024LL * 1024LL * 1024LL)) + 1ULL;
+		auto overflowSizeString = std::to_string(overflowBase) + "GB";
+		LOG4CXX_DECODE_CHAR(lsOverflowAfterMultiply, overflowSizeString);
+		LOGUNIT_ASSERT_EQUAL(defaultValue, OptionConverter::toFileSize(lsOverflowAfterMultiply, defaultValue));
+	}
+
+	/**
+	 * An unknown configurator class name must not throw
+	 * and must leave the repository unconfigured.
+	 */
+	void selectAndConfigureWithUnknownConfiguratorClass()
+	{
+		auto repository = Hierarchy::create();
+		auto status = OptionConverter::selectAndConfigure
+			( File(LOG4CXX_STR("input/hierarchyThreshold1.properties"))
+			, LOG4CXX_STR("org.example.NoSuchConfigurator")
+			, repository
+			, 0
+			);
+		LOGUNIT_ASSERT_EQUAL(status, ConfigurationStatus::NotConfigured);
+		LOGUNIT_ASSERT(repository->getRootLogger()->getAllAppenders().empty());
 	}
 
 	void testTmpDir()

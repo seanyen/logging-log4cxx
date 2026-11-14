@@ -18,12 +18,6 @@
 #ifndef _LOG4CXX_HELPER_PROPERTIES_H
 #define _LOG4CXX_HELPER_PROPERTIES_H
 
-#if defined(_MSC_VER)
-	#pragma warning (push)
-	#pragma warning ( disable: 4231 4251 4275 4786 )
-#endif
-
-
 #include <log4cxx/logstring.h>
 #include <log4cxx/helpers/object.h>
 #include <log4cxx/helpers/inputstream.h>
@@ -31,27 +25,36 @@
 #include <vector>
 #include <istream>
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 namespace helpers
 {
 class LOG4CXX_EXPORT Properties
 {
 	private:
-		typedef std::map<LogString, LogString> PropertyMap;
+		template <typename Char> struct Less;
+		using PropertyMap = std::map<LogString, LogString, Less<logchar> >;
 		PropertyMap* properties;
-		Properties(const Properties&);
-		Properties& operator=(const Properties&);
 
-	public:
+	public: // ...structors
 		/**
 		 *  Create new instance.
 		 */
 		Properties();
+		Properties(const Properties&);
+		Properties(const Properties&&) = delete;
+		Properties& operator=(const Properties&);
+		Properties& operator=(const Properties&&) = delete;
 		/**
 		 * Destructor.
 		 */
 		~Properties();
+
+	public: // Methods
+		/** Does this contain any key-value pairs?
+		 */
+		bool isEmpty() const;
+
 		/**
 		Reads a property list (key and element pairs) from the input stream.
 		The stream is assumed to be using the ISO 8859-1 character encoding.
@@ -81,7 +84,7 @@ class LOG4CXX_EXPORT Properties
 		and any whitespace characters after it are also skipped. All remaining
 		characters on the line become part of the associated element string.
 		Within the element string, the ASCII escape sequences <code>\\t</code>,
-		<code>\\n</code>, <code>\\r</code>, <code>\\</code>, <code>\\"</code>,
+		<code>\\n</code>, <code>\\r</code>, <code>\\ </code>, <code>\\\"</code>,
 		<code>\\'</code>, <code>\\</code> (a backslash and a space), and
 		<code>\\uxxxx</code> are recognized
 		and converted to single characters. Moreover, if the last character on
@@ -108,7 +111,7 @@ class LOG4CXX_EXPORT Properties
 		          cantaloupe, watermelon, \
 		          kiwi, mango
 		</pre>
-		The key is "<code>fruits</code>" and the associated element is:
+		The key is <code>"fruits"</code> and the associated element is:
 		<pre>
 		"apple, banana, pear, cantaloupe, watermelon, kiwi, mango"
 		</pre>
@@ -121,7 +124,7 @@ class LOG4CXX_EXPORT Properties
 		<pre>
 		cheeses
 		</pre>
-		specifies that the key is "<code>cheeses</code>" and the associated
+		specifies that the key is <code>"cheeses"</code> and the associated
 		element is the empty string.
 
 		@param inStream the input stream.
@@ -129,7 +132,7 @@ class LOG4CXX_EXPORT Properties
 		@throw IOException if an error occurred when reading from the input
 		stream.
 		*/
-		void load(InputStreamPtr inStream);
+		void load(const InputStreamPtr& inStream);
 
 		/**
 		 *  Calls Properties::put.
@@ -176,10 +179,6 @@ class LOG4CXX_EXPORT Properties
 }; // class Properties
 }  // namespace helpers
 } // namespace log4cxx
-
-#if defined(_MSC_VER)
-	#pragma warning (pop)
-#endif
 
 
 #endif //_LOG4CXX_HELPER_PROPERTIES_H

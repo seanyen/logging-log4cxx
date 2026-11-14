@@ -67,17 +67,18 @@ public:
 
 	void tearDown()
 	{
-		log4cxx::spi::LoggerRepositoryPtr rep = root->getLoggerRepository().lock();
-		if (rep) {
+		auto rep = root->getLoggerRepository();
+
+		if (rep)
+		{
 			rep->resetConfiguration();
 		}
 	}
 
 	void test1()
 	{
-		PropertyConfigurator::configure(LOG4CXX_FILE("input/l7d1.properties"));
-
-		log4cxx::helpers::Pool pool;
+		auto status = PropertyConfigurator::configure(LOG4CXX_FILE("input/l7d1.properties"));
+		LOGUNIT_ASSERT_EQUAL(status, spi::ConfigurationStatus::Configured);
 
 		for (int i = 0; i < 3; i++)
 		{
@@ -102,7 +103,7 @@ public:
 				LOG4CXX_TEST_STR("log4j"), LOG4CXX_TEST_STR("log4cxx"));
 		}
 
-		LOGUNIT_ASSERT(Compare::compare(LOG4CXX_FILE("output/temp"),
+		LOGUNIT_ASSERT(Compare::compare(LOG4CXX_FILE("output/l7d1"),
 				LOG4CXX_FILE("witness/l7d.1")));
 	}
 

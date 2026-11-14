@@ -18,58 +18,20 @@
 #ifndef _LOG4CXX_WRITER_APPENDER_H
 #define _LOG4CXX_WRITER_APPENDER_H
 
-#if defined(_MSC_VER)
-	#pragma warning ( push )
-	#pragma warning ( disable: 4231 4251 4275 4786 )
-#endif
-
 #include <log4cxx/appenderskeleton.h>
 #include <log4cxx/helpers/outputstreamwriter.h>
-#include <log4cxx/boost-std-configuration.h>
 #include <atomic>
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
-
-namespace helpers
-{
-class Transcoder;
-}
 
 /**
-WriterAppender appends log events to a standard output stream
+An abstract base for an appender that writes to a character stream
 */
 class LOG4CXX_EXPORT WriterAppender : public AppenderSkeleton
 {
-	private:
-		/**
-		Immediate flush means that the underlying writer or output stream
-		will be flushed at the end of each append operation. Immediate
-		flush is slower but ensures that each append request is actually
-		written. If <code>immediateFlush</code> is set to
-		<code>false</code>, then there is a good chance that the last few
-		logs events are not actually written to persistent media if and
-		when the application crashes.
-
-		<p>The <code>immediateFlush</code> variable is set to
-		<code>true</code> by default.
-
-		*/
-		std::atomic<bool> immediateFlush;
-
-		/**
-		The encoding to use when opening an input stream.
-		<p>The <code>encoding</code> variable is set to <code>""</code> by
-		default which results in the utilization of the system's default
-		encoding.  */
-		LogString encoding;
-
-		/**
-		*  This is the {@link Writer Writer} where we will write to.
-		*/
-		log4cxx::helpers::WriterPtr writer;
-
-
+	protected:
+		struct WriterAppenderPriv;
 	public:
 		DECLARE_ABSTRACT_LOG4CXX_OBJECT(WriterAppender)
 		BEGIN_LOG4CXX_CAST_MAP()
@@ -78,21 +40,29 @@ class LOG4CXX_EXPORT WriterAppender : public AppenderSkeleton
 		END_LOG4CXX_CAST_MAP()
 
 		/**
-		This default constructor does nothing.*/
+		An uninitialised Appender.
+		*/
 		WriterAppender();
 	protected:
-		WriterAppender(const LayoutPtr& layout,
-			log4cxx::helpers::WriterPtr& writer);
-		WriterAppender(const LayoutPtr& layout);
+		/**
+		An appender that writes spi::LoggingEvent messages
+		formatted by \c layout to the character stream attached to \c writer.
+		*/
+		WriterAppender(const LayoutPtr& layout, const helpers::WriterPtr& writer = helpers::WriterPtr());
+		/**
+		An appender that uses the sub-classed \c priv instance data.
+		*/
+		WriterAppender(std::unique_ptr<WriterAppenderPriv> priv);
 
 	public:
 		~WriterAppender();
 
+		using AppenderSkeleton::activateOptions;
 		/**
 		Derived appenders should override this method if option structure
 		requires it.
 		*/
-		virtual void activateOptions(log4cxx::helpers::Pool& pool);
+		void activateOptions(   ) override;
 
 		/**
 		If the <b>ImmediateFlush</b> option is set to
@@ -112,10 +82,7 @@ class LOG4CXX_EXPORT WriterAppender : public AppenderSkeleton
 		/**
 		Returns value of the <b>ImmediateFlush</b> option.
 		*/
-		bool getImmediateFlush() const
-		{
-			return immediateFlush;
-		}
+		bool getImmediateFlush() const;
 
 		/**
 		This method is called by the AppenderSkeleton#doAppend
@@ -129,7 +96,7 @@ class LOG4CXX_EXPORT WriterAppender : public AppenderSkeleton
 		layout.
 
 		*/
-		virtual void append(const spi::LoggingEventPtr& event, log4cxx::helpers::Pool& p);
+		void append( const spi::LoggingEventPtr& event ) override;
 
 
 	protected:
@@ -141,80 +108,37 @@ class LOG4CXX_EXPORT WriterAppender : public AppenderSkeleton
 		value <code>false</code> is returned. */
 		virtual bool checkEntryConditions() const;
 
-
 	public:
 		/**
-		Close this appender instance. The underlying stream or writer is
-		also closed.
+		The current encoding value.
 
-		<p>Closed appenders cannot be reused.
-		*/
-		virtual void close();
-
-	protected:
-		/**
-		 * Close the underlying {@link log4cxx::helpers::Writer}.
-		 * */
-		void closeWriter();
-
-		/**
-		    Returns an OutputStreamWriter when passed an OutputStream.  The
-		    encoding used will depend on the value of the
-		    <code>encoding</code> property.  If the encoding value is
-		    specified incorrectly the writer will be opened using the default
-		    system encoding (an error message will be printed to the loglog.  */
-		virtual log4cxx::helpers::WriterPtr createWriter(
-			log4cxx::helpers::OutputStreamPtr& os);
-
-	public:
-		LogString getEncoding() const;
-		void setEncoding(const LogString& value);
-		void setOption(const LogString& option,
-			const LogString& value);
-
-		/**
-		  <p>Sets the Writer where the log output will go. The
-		  specified Writer must be opened by the user and be
-		  writable.
-
-		  <p>The <code>java.io.Writer</code> will be closed when the
-		  appender instance is closed.
-
-
-		  <p><b>WARNING:</b> Logging to an unopened Writer will fail.
-		  <p>
-		  @param writer An already opened Writer.  */
-		void setWriter(const log4cxx::helpers::WriterPtr& writer);
-#ifdef LOG4CXX_MULTI_PROCESS
-		const log4cxx::helpers::WriterPtr getWriter()
-		{
-			return writer;
-		};
-#endif
-
-		virtual bool requiresLayout() const;
-
-	protected:
-		/**
-		 Actual writing occurs here.
-		*/
-		virtual void subAppend(const spi::LoggingEventPtr& event, log4cxx::helpers::Pool& p);
-
-
-		/**
-		Write a footer as produced by the embedded layout's
-		Layout#appendFooter method.  */
-		virtual void writeFooter(log4cxx::helpers::Pool& p);
-
-		/**
-		Write a header as produced by the embedded layout's
-		Layout#appendHeader method.  */
-		virtual void writeHeader(log4cxx::helpers::Pool& p);
-
-		/**
-		 * Set the writer.  Mutex must already be held.
+		\sa setOption
 		 */
-		void setWriterInternal(const log4cxx::helpers::WriterPtr& writer);
+		LogString getEncoding() const;
+		/**
+		Set the encoding to \c value.
+
+		\sa setOption
+		 */
+		void setEncoding(const LogString& value);
+
+		/**
+		\copybrief AppenderSkeleton::setOption()
+
+		Supported options | Supported values | Default value |
+		-------------- | ---------------- | --------------- |
+		Encoding | C,UTF-8,UTF-16,UTF-16BE,UTF-16LE,646,US-ASCII,ISO646-US,ANSI_X3.4-1968,ISO-8859-1,ISO-LATIN-1 | UTF-8 |
+
+		\sa AppenderSkeleton::setOption()
+		 */
+		void setOption(const LogString& option, const LogString& value) override;
+
+	protected:
+		/**
+		 Format \c event as a message and write it to the character stream.
+		*/
+		virtual void subAppend( const spi::LoggingEventPtr& event );
+
 
 	private:
 		//
@@ -226,9 +150,5 @@ class LOG4CXX_EXPORT WriterAppender : public AppenderSkeleton
 LOG4CXX_PTR_DEF(WriterAppender);
 
 }  //namespace log4cxx
-
-#if defined(_MSC_VER)
-	#pragma warning ( pop )
-#endif
 
 #endif //_LOG4CXX_WRITER_APPENDER_H

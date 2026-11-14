@@ -20,9 +20,9 @@
 #include <log4cxx/pattern/literalpatternconverter.h>
 #include <log4cxx/helpers/loglog.h>
 
-using namespace log4cxx;
-using namespace log4cxx::pattern;
-using namespace log4cxx::helpers;
+using namespace LOG4CXX_NS;
+using namespace LOG4CXX_NS::pattern;
+using namespace LOG4CXX_NS::helpers;
 
 const logchar PatternParser::ESCAPE_CHAR = 0x25; // '%'
 
@@ -112,20 +112,21 @@ size_t PatternParser::extractOptions(const LogString& pattern, LogString::size_t
 	return i;
 }
 
-void PatternParser::parse(
-	const LogString& pattern,
-	std::vector<PatternConverterPtr>& patternConverters,
-	std::vector<FormattingInfoPtr>& formattingInfos,
-	const PatternMap& rules)
-{
 
+PatternConverterList PatternParser::parse
+	( const LogString&      pattern
+	, const PatternMap&     rules
+	)
+{
+	PatternConverterList patternConverters;
 	LogString currentLiteral;
 
 	size_t patternLength = pattern.length();
 	int state = LITERAL_STATE;
 	logchar c;
 	size_t i = 0;
-	FormattingInfoPtr formattingInfo(FormattingInfo::getDefault());
+	int minDigitCount{ 0 }, maxDigitCount{ 0 };
+	auto formattingInfo = FormattingInfo::getDefault();
 
 	while (i < patternLength)
 	{
@@ -157,7 +158,6 @@ void PatternParser::parse(
 						{
 							patternConverters.push_back(
 								LiteralPatternConverter::newInstance(currentLiteral));
-							formattingInfos.push_back(FormattingInfo::getDefault());
 							currentLiteral.erase(currentLiteral.begin(), currentLiteral.end());
 						}
 
@@ -179,10 +179,9 @@ void PatternParser::parse(
 				switch (c)
 				{
 					case 0x2D: // '-'
-						formattingInfo = FormattingInfoPtr(
-								new FormattingInfo(
+						formattingInfo = std::make_shared<FormattingInfo>(
 									true, formattingInfo->getMinLength(),
-									formattingInfo->getMaxLength()));
+									formattingInfo->getMaxLength());
 
 						break;
 
@@ -195,17 +194,17 @@ void PatternParser::parse(
 
 						if ((c >= 0x30 /* '0' */) && (c <= 0x39 /* '9' */))
 						{
-							formattingInfo = FormattingInfoPtr(
-									new FormattingInfo(
+							formattingInfo = std::make_shared<FormattingInfo>(
 										formattingInfo->isLeftAligned(), c - 0x30 /* '0' */,
-										formattingInfo->getMaxLength()));
+										formattingInfo->getMaxLength());
 							state = MIN_STATE;
+							minDigitCount = 1;
 						}
 						else
 						{
 							i = finalizeConverter(
 									c, pattern, i, currentLiteral, formattingInfo,
-									rules, patternConverters, formattingInfos);
+									rules, patternConverters);
 
 							// Next pattern is assumed to be a literal.
 							state = LITERAL_STATE;
@@ -223,13 +222,13 @@ void PatternParser::parse(
 			case MIN_STATE:
 				currentLiteral.append(1, c);
 
-				if ((c >= 0x30 /* '0' */) && (c <= 0x39 /* '9' */))
+				if ((c >= 0x30 /* '0' */) && (c <= 0x39 /* '9' */) && minDigitCount < 3)
 				{
-					formattingInfo = FormattingInfoPtr(
-							new FormattingInfo(
+					formattingInfo = std::make_shared<FormattingInfo>(
 								formattingInfo->isLeftAligned(),
 								(formattingInfo->getMinLength() * 10) + (c - 0x30 /* '0' */),
-								formattingInfo->getMaxLength()));
+								formattingInfo->getMaxLength());
+					++minDigitCount;
 				}
 				else if (c == 0x2E /* '.' */)
 				{
@@ -239,7 +238,7 @@ void PatternParser::parse(
 				{
 					i = finalizeConverter(
 							c, pattern, i, currentLiteral, formattingInfo,
-							rules, patternConverters, formattingInfos);
+							rules, patternConverters);
 					state = LITERAL_STATE;
 					formattingInfo = FormattingInfo::getDefault();
 
@@ -256,11 +255,11 @@ void PatternParser::parse(
 
 				if ((c >= 0x30 /* '0' */) && (c <= 0x39 /* '9' */))
 				{
-					formattingInfo = FormattingInfoPtr(
-							new FormattingInfo(
+					formattingInfo = std::make_shared<FormattingInfo>(
 								formattingInfo->isLeftAligned(), formattingInfo->getMinLength(),
-								c - 0x30 /* '0' */));
+								c - 0x30 /* '0' */);
 					state = MAX_STATE;
+					maxDigitCount = 1;
 				}
 				else
 				{
@@ -274,18 +273,18 @@ void PatternParser::parse(
 			case MAX_STATE:
 				currentLiteral.append(1, c);
 
-				if ((c >= 0x30 /* '0' */) && (c <= 0x39 /* '9' */))
+				if ((c >= 0x30 /* '0' */) && (c <= 0x39 /* '9' */) && maxDigitCount < 3)
 				{
-					formattingInfo = FormattingInfoPtr(
-							new FormattingInfo(
+					formattingInfo = std::make_shared<FormattingInfo>(
 								formattingInfo->isLeftAligned(), formattingInfo->getMinLength(),
-								(formattingInfo->getMaxLength() * 10) + (c - 0x30 /* '0' */)));
+								(formattingInfo->getMaxLength() * 10) + (c - 0x30 /* '0' */));
+					++maxDigitCount;
 				}
 				else
 				{
 					i = finalizeConverter(
 							c, pattern, i, currentLiteral, formattingInfo,
-							rules, patternConverters, formattingInfos);
+							rules, patternConverters);
 					state = LITERAL_STATE;
 					formattingInfo = FormattingInfo::getDefault();
 
@@ -304,8 +303,8 @@ void PatternParser::parse(
 	{
 		patternConverters.push_back(
 			LiteralPatternConverter::newInstance(currentLiteral));
-		formattingInfos.push_back(FormattingInfo::getDefault());
 	}
+	return patternConverters;
 }
 
 
@@ -340,8 +339,7 @@ size_t PatternParser::finalizeConverter(
 	logchar c, const LogString& pattern, size_t i,
 	LogString& currentLiteral, const FormattingInfoPtr& formattingInfo,
 	const PatternMap&  rules,
-	std::vector<PatternConverterPtr>& patternConverters,
-	std::vector<FormattingInfoPtr>&  formattingInfos)
+	PatternConverterList& patternConverters)
 {
 	LogString convBuf;
 	i = extractConverter(c, pattern, i, convBuf, currentLiteral);
@@ -351,7 +349,6 @@ size_t PatternParser::finalizeConverter(
 		LogLog::error(LOG4CXX_STR("Empty conversion specifier"));
 		patternConverters.push_back(
 			LiteralPatternConverter::newInstance(currentLiteral));
-		formattingInfos.push_back(FormattingInfo::getDefault());
 	}
 	else
 	{
@@ -372,18 +369,16 @@ size_t PatternParser::finalizeConverter(
 			LogLog::error(msg);
 			patternConverters.push_back(
 				LiteralPatternConverter::newInstance(currentLiteral));
-			formattingInfos.push_back(FormattingInfo::getDefault());
 		}
 		else
 		{
 			patternConverters.push_back(pc);
-			formattingInfos.push_back(formattingInfo);
+			pc->setFormattingInfo(formattingInfo);
 
 			if (currentLiteral.length() > 0)
 			{
 				patternConverters.push_back(
 					LiteralPatternConverter::newInstance(currentLiteral));
-				formattingInfos.push_back(FormattingInfo::getDefault());
 			}
 		}
 	}

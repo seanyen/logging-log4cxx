@@ -25,17 +25,18 @@ Sometimes, you may want to extend Log4cxx, for example by creating
 a new appender to write out data in a new format.  The following
 guide shows how you can extend Log4cxx in order to add a new appender.
 
-The full sample application can be found in the src/examples/cpp
-directory.
+The full sample application can be found at \ref custom-appender.cpp and \ref custom-appender.xml .
 
 The first thing for our example is to create a class that extends
 log4cxx.AppenderSkeleton so that we don't need to implement all of
 the virtual methods that are defined in log4cxx.Appender:
 
 ~~~{.cpp}
-namespace log4cxx {
+using namespace log4cxx;
 
-class NullWriterAppender : public log4cxx::AppenderSkeleton {
+namespace com::foo {
+
+class NullWriterAppender : public AppenderSkeleton {
 };
 
 }
@@ -45,9 +46,11 @@ Next, we need to add in a few macros in order to properly register
 our new appender with Log4cxx:
 
 ~~~{.cpp}
-namespace log4cxx {
+using namespace log4cxx;
 
-class NullWriterAppender : public log4cxx::AppenderSkeleton {
+namespace com::foo {
+
+class NullWriterAppender : public AppenderSkeleton {
 public:
 	DECLARE_LOG4CXX_OBJECT(NullWriterAppender)
 	BEGIN_LOG4CXX_CAST_MAP()
@@ -62,9 +65,21 @@ IMPLEMENT_LOG4CXX_OBJECT(NullWriterAppender)
 }
 ~~~
 
-These macros tell Log4cxx what the name of our class is, as well as giving
-Log4cxx a way of instansiating our class.  Without these macros, the custom
-class will not work.
+These macros allow Log4cxx to instantiate your class and provide log4cxx::cast.
+The `DECLARE_LOG4CXX_OBJECT` macro adds method declarations and
+the `IMPLEMENT_LOG4CXX_OBJECT` macro adds implementations.
+The `IMPLEMENT_LOG4CXX_OBJECT` also adds a static reference value
+which is initialized during program startup
+by calling, for example, `NullWriterAppender::registerClass()`.
+
+To avoid [Static Initialization Order Fiasco](https://en.cppreference.com/w/cpp/language/siof)
+when configuring Log4cxx during static initialization
+(as in [the recommended runtime configuration technique])
+you should put your extension classes (and the `IMPLEMENT_LOG4CXX_OBJECT` macro)
+in a dynamic library (DSO/DLL) that is loaded before loading the Log4cxx configuration.
+Alternatively, you could call `NullWriterAppender::registerClass()`
+before loading the configuration.
+Multiple `registerClass()` calls do no harm.
 
 Now, let's add some basic functionality to our class.  As the name of
 our class implies, we are going to do nothing with our appender here, as
@@ -81,23 +96,28 @@ These are basically stub methods, with a few comments on their use:
 ~~~{.cpp}
 	NullWriterAppender(){}
 
-	virtual void close(){}
+	void close() override {}
 
-	virtual bool requiresLayout() const {
+	bool requiresLayout() const override {
 		return false;
 	}
 
-	virtual void append(const spi::LoggingEventPtr& event, log4cxx::helpers::Pool& p){
+	void append(const spi::LoggingEventPtr& event, helpers::Pool& p) override {
 		// This gets called whenever there is a valid event for our appender.
 	}
 
-	virtual void activateOptions(log4cxx::helpers::Pool& /* pool */) {
+	void activateOptions(helpers::Pool& pool) override {
 		// Given all of our options, do something useful(e.g. open a file)
 	}
 
-	virtual void setOption(const LogString& option, const LogString& value){
-		if (helpers::StringHelper::equalsIgnoreCase(option,
-			   LOG4CXX_STR("SOMEVALUE"), LOG4CXX_STR("somevalue"))){
+	void setOption(const LogString& option, const LogString& value) override {
+		if (helpers::StringHelper::equalsIgnoreCase
+			( option
+			, LOG4CXX_STR("SOMEVALUE")
+			, LOG4CXX_STR("somevalue")
+			)
+		   )
+		{
 			// Do something with the 'value' here.
 		}
 	}
@@ -139,3 +159,11 @@ to Log4cxx, including(but not limited to):
 * [Appenders](@ref log4cxx.Appender)
 * [Layouts](@ref log4cxx.Layout)
 * [Filters](@ref log4cxx.spi.Filter)
+
+\example custom-appender.cpp
+This example shows how to extend Log4cxx with a new appender.
+
+\example custom-appender.xml
+This example shows how to use a new appender in a configuration file.
+
+[the recommended runtime configuration technique]:quick-start.html#configuration

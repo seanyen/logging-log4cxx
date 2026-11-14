@@ -19,14 +19,19 @@
 #include <log4cxx/helpers/bytearrayoutputstream.h>
 #include <log4cxx/helpers/exception.h>
 #include <log4cxx/helpers/bytebuffer.h>
-#include <string.h>
 
-using namespace log4cxx;
-using namespace log4cxx::helpers;
+using namespace LOG4CXX_NS;
+using namespace LOG4CXX_NS::helpers;
+
+struct ByteArrayOutputStream::ByteArrayOutputStreamPriv
+{
+	ByteList array;
+};
 
 IMPLEMENT_LOG4CXX_OBJECT(ByteArrayOutputStream)
 
 ByteArrayOutputStream::ByteArrayOutputStream()
+	: m_priv(std::make_unique<ByteArrayOutputStreamPriv>())
 {
 }
 
@@ -34,26 +39,36 @@ ByteArrayOutputStream::~ByteArrayOutputStream()
 {
 }
 
-void ByteArrayOutputStream::close(Pool& /* p */)
+void ByteArrayOutputStream::close(  )
 {
 }
 
-void ByteArrayOutputStream::flush(Pool& /* p */)
+void ByteArrayOutputStream::flush(  )
 {
 }
 
-void ByteArrayOutputStream::write(ByteBuffer& buf, Pool& /* p */ )
+void ByteArrayOutputStream::write( ByteBuffer& buf )
 {
-	size_t sz = array.size();
-	array.resize(sz + buf.remaining());
-	memcpy(&array[sz], buf.current(), buf.remaining());
-	buf.position(buf.limit());
+	const size_t count = buf.remaining();
+
+	if (count == 0)
+	{
+		return;
+	}
+
+	if (count > m_priv->array.max_size() - m_priv->array.size())
+	{
+		throw IllegalArgumentException(LOG4CXX_STR("ByteArrayOutputStream::write overflow"));
+	}
+
+	const char* const current = buf.current();
+	m_priv->array.insert(m_priv->array.end(), current, current + count);
+	buf.increment_position(count);
 }
 
 std::vector<unsigned char> ByteArrayOutputStream::toByteArray() const
 {
-	return array;
+	return m_priv->array;
 }
-
 
 

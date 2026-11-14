@@ -21,37 +21,27 @@
 #include <log4cxx/helpers/transcoder.h>
 #include <algorithm>
 #include <vector>
-#include <apr_strings.h>
-#include <log4cxx/helpers/pool.h>
-#if !defined(LOG4CXX)
-	#define LOG4CXX 1
-#endif
-#include <log4cxx/private/log4cxx_private.h>
-#include <cctype>
 #include <iterator>
-#include <apr.h>
-//LOG4CXX-417: need stdlib.h for atoi on some systems.
-#ifdef APR_HAVE_STDLIB_H
-	#include <stdlib.h>
-#endif
+#include <algorithm>
+#include <cctype>
 
-
-using namespace log4cxx;
-using namespace log4cxx::helpers;
+using namespace LOG4CXX_NS;
+using namespace LOG4CXX_NS::helpers;
 
 bool StringHelper::equalsIgnoreCase(const LogString& s1, const logchar* upper, const logchar* lower)
 {
-	for (LogString::const_iterator iter = s1.begin();
-		iter != s1.end();
-		iter++, upper++, lower++)
+	for (const auto& item : s1)
 	{
-		if (*iter != *upper && *iter != * lower)
+		if (0 == item || // OSS-Fuzz makes strings with embedded NUL characters
+			(item != *upper && item != *lower))
 		{
 			return false;
 		}
+		++upper;
+		++lower;
 	}
 
-	return (*upper == 0);
+	return 0 == *upper;
 }
 
 bool StringHelper::equalsIgnoreCase(const LogString& s1, const LogString& upper, const LogString& lower)
@@ -77,9 +67,20 @@ bool StringHelper::equalsIgnoreCase(const LogString& s1, const LogString& upper,
 
 LogString StringHelper::toLowerCase(const LogString& s)
 {
+	// Fold ASCII A-Z only. Passing a value not representable as unsigned char
+	// (or EOF) to std::tolower(int) is undefined behaviour; with signed char,
+	// any byte > 0x7F sign-extends to a negative int. The previous implementation
+	// also produced locale-dependent output for the same input, which is wrong
+	// for the callers (class names, color names, column names — all ASCII).
 	LogString d;
-	std::transform(s.begin(), s.end(),
-		std::insert_iterator<LogString>(d, d.begin()), tolower);
+	d.reserve(s.size());
+	for (auto ch : s)
+	{
+		if (ch >= static_cast<logchar>('A') && ch <= static_cast<logchar>('Z'))
+			d.push_back(static_cast<logchar>(ch + ('a' - 'A')));
+		else
+			d.push_back(ch);
+	}
 	return d;
 }
 
@@ -119,22 +120,23 @@ bool StringHelper::endsWith(const LogString& s, const LogString& suffix)
 
 int StringHelper::toInt(const LogString& s)
 {
-	std::string as;
-	Transcoder::encode(s, as);
-	return atoi(as.c_str());
+	return std::stoi(s);
 }
 
-log4cxx_int64_t StringHelper::toInt64(const LogString& s)
+int64_t StringHelper::toInt64(const LogString& s)
 {
-	std::string as;
-	Transcoder::encode(s, as);
-	return apr_atoi64(as.c_str());
+	return std::stoll(s);
 }
 
-void StringHelper::toString(int n, Pool& pool, LogString& s)
+void StringHelper::toString(int n, LogString& dst)
 {
-	char* fmt = pool.itoa(n);
-	Transcoder::decode(fmt, s);
+#if LOG4CXX_LOGCHAR_IS_WCHAR
+	dst.append(std::to_wstring(n));
+#elif LOG4CXX_LOGCHAR_IS_UTF8
+	dst.append(std::to_string(n));
+#else
+	Transcoder::decode(std::to_string(n), dst);
+#endif
 }
 
 void StringHelper::toString(bool val, LogString& dst)
@@ -150,57 +152,52 @@ void StringHelper::toString(bool val, LogString& dst)
 }
 
 
-void StringHelper::toString(log4cxx_int64_t n, Pool& pool, LogString& dst)
+void StringHelper::toString(int64_t n, LogString& dst)
 {
-	if (n >= INT_MIN && n <= INT_MAX)
-	{
-		toString((int) n, pool, dst);
-	}
-	else
-	{
-		const log4cxx_int64_t BILLION = APR_INT64_C(1000000000);
-		int billions = (int) (n / BILLION);
-		char* upper = pool.itoa(billions);
-		int remain = (int) (n - billions * BILLION);
-
-		if (remain < 0)
-		{
-			remain *= -1;
-		}
-
-		char* lower = pool.itoa(remain);
-		Transcoder::decode(upper, dst);
-		dst.append(9 - strlen(lower), 0x30 /* '0' */);
-		Transcoder::decode(lower, dst);
-	}
+#if LOG4CXX_LOGCHAR_IS_WCHAR
+	dst.append(std::to_wstring(n));
+#elif LOG4CXX_LOGCHAR_IS_UTF8
+	dst.append(std::to_string(n));
+#else
+	Transcoder::decode(std::to_string(n), dst);
+#endif
 }
 
 
-void StringHelper::toString(size_t n, Pool& pool, LogString& s)
+void StringHelper::toString(size_t n, LogString& dst)
 {
-	toString((log4cxx_int64_t) n, pool, s);
+	auto ull = static_cast<unsigned long long>(n);
+#if LOG4CXX_LOGCHAR_IS_WCHAR
+	dst.append(std::to_wstring(ull));
+#elif LOG4CXX_LOGCHAR_IS_UTF8
+	dst.append(std::to_string(ull));
+#else
+	Transcoder::decode(std::to_string(ull), dst);
+#endif
 }
 
 LogString StringHelper::format(const LogString& pattern, const std::vector<LogString>& params)
 {
 
 	LogString result;
-	int i = 0;
+	LogString::size_type i = 0;
 
-	while (pattern[i] != 0)
+	while (i < pattern.length())
 	{
-		if (pattern[i] == 0x7B /* '{' */ && pattern[i + 1] >= 0x30 /* '0' */ &&
+		if (i + 2 < pattern.length() &&
+			pattern[i] == 0x7B /* '{' */ && pattern[i + 1] >= 0x30 /* '0' */ &&
 			pattern[i + 1] <= 0x39 /* '9' */ && pattern[i + 2] == 0x7D /* '}' */)
 		{
-			int arg = pattern[i + 1] - 0x30 /* '0' */;
-			result = result + params[arg];
-			i += 3;
+			LogString::size_type arg = pattern[i + 1] - 0x30 /* '0' */;
+			if (arg < params.size())
+			{
+				result = result + params[arg];
+				i += 3;
+				continue;
+			}
 		}
-		else
-		{
-			result = result + pattern[i];
-			i++;
-		}
+		result = result + pattern[i];
+		i++;
 	}
 
 	return result;

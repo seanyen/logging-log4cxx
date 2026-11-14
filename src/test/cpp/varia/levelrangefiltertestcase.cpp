@@ -56,8 +56,10 @@ public:
 
 	void tearDown()
 	{
-		log4cxx::spi::LoggerRepositoryPtr rep = root->getLoggerRepository().lock();
-		if (rep) {
+		auto rep = root->getLoggerRepository();
+
+		if (rep)
+		{
 			rep->resetConfiguration();
 		}
 	}
@@ -84,8 +86,7 @@ public:
 		int passCount = 0;
 		LogString sbuf(LOG4CXX_STR("pass "));
 
-		Pool pool;
-		StringHelper::toString(passCount, pool, sbuf);
+		StringHelper::toString(passCount, sbuf);
 
 		sbuf.append(LOG4CXX_STR("; no min or max set"));
 		common(sbuf);
@@ -94,7 +95,7 @@ public:
 		// test with a min set
 		rangeFilter->setLevelMin(Level::getWarn());
 		sbuf.assign(LOG4CXX_STR("pass "));
-		StringHelper::toString(passCount, pool, sbuf);
+		StringHelper::toString(passCount, sbuf);
 		sbuf.append(LOG4CXX_STR("; min set to WARN, max not set"));
 		common(sbuf);
 		passCount++;
@@ -107,7 +108,7 @@ public:
 		//test with max set
 		rangeFilter->setLevelMax(Level::getWarn());
 		sbuf.assign(LOG4CXX_STR("pass "));
-		StringHelper::toString(passCount, pool, sbuf);
+		StringHelper::toString(passCount, sbuf);
 		sbuf.append(LOG4CXX_STR("; min not set, max set to WARN"));
 		common(sbuf);
 		passCount++;
@@ -132,7 +133,7 @@ public:
 				rangeFilter->setLevelMax(levelArray[y]);
 
 				sbuf.assign(LOG4CXX_STR("pass "));
-				StringHelper::toString(passCount, pool, sbuf);
+				StringHelper::toString(passCount, sbuf);
 				sbuf.append(LOG4CXX_STR("; filter set to accept between "));
 				sbuf.append(levelArray[x]->toString());
 				sbuf.append(LOG4CXX_STR(" and "));
@@ -171,8 +172,7 @@ public:
 		int passCount = 0;
 		LogString sbuf(LOG4CXX_STR("pass "));
 
-		Pool pool;
-		StringHelper::toString(passCount, pool, sbuf);
+		StringHelper::toString(passCount, sbuf);
 
 		// test with no min or max set
 		sbuf.append(LOG4CXX_STR("; no min or max set"));
@@ -183,7 +183,7 @@ public:
 		rangeFilter->setLevelMin(Level::getWarn());
 		sbuf.assign(LOG4CXX_STR("pass "));
 
-		StringHelper::toString(passCount, pool, sbuf);
+		StringHelper::toString(passCount, sbuf);
 		sbuf.append(LOG4CXX_STR("; min set to WARN, max not set"));
 		common(sbuf);
 		passCount++;
@@ -197,7 +197,7 @@ public:
 		rangeFilter->setLevelMax(Level::getWarn());
 		sbuf.assign(LOG4CXX_STR("pass "));
 
-		StringHelper::toString(passCount, pool, sbuf);
+		StringHelper::toString(passCount, sbuf);
 
 		sbuf.append(LOG4CXX_STR("; min not set, max set to WARN"));
 		common(sbuf);
@@ -222,7 +222,7 @@ public:
 				rangeFilter->setLevelMax(levelArray[y]);
 
 				sbuf.assign(LOG4CXX_STR("pass "));
-				StringHelper::toString(passCount, pool, sbuf);
+				StringHelper::toString(passCount, sbuf);
 				sbuf.append(LOG4CXX_STR("; filter set to accept between "));
 				sbuf.append(levelArray[x]->toString());
 				sbuf.append(LOG4CXX_STR(" and "));

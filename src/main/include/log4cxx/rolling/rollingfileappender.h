@@ -18,10 +18,14 @@
 #if !defined(_LOG4CXX_ROLLING_ROLLING_FILE_APPENDER_H)
 #define _LOG4CXX_ROLLING_ROLLING_FILE_APPENDER_H
 
-#include <log4cxx/rolling/rollingfileappenderskeleton.h>
+#include <log4cxx/fileappender.h>
+#include <log4cxx/spi/optionhandler.h>
+#include <log4cxx/fileappender.h>
+#include <log4cxx/rolling/triggeringpolicy.h>
+#include <log4cxx/rolling/rollingpolicy.h>
+#include <log4cxx/rolling/action.h>
 
-
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 namespace rolling
 {
@@ -39,28 +43,24 @@ namespace rolling
  * <code>RollingPolicy</code> and a <code>TriggeringPolicy</code>.
  *
  * <p><code>RollingFileAppender</code> can be configured programattically or
- * using {@link log4cxx::xml::DOMConfigurator}. Here is a sample
- * configration file:
+ * using {@link log4cxx::xml::DOMConfigurator}.
+ * The following is a sample configuration file.
 
 <pre>&lt;?xml version="1.0" encoding="UTF-8" ?>
 &lt;!DOCTYPE log4j:configuration>
-
-&lt;log4j:configuration debug="true">
-
+  &lt;log4j:configuration debug="true">
   &lt;appender name="ROLL" class="org.apache.log4j.rolling.RollingFileAppender">
     <b>&lt;rollingPolicy class="org.apache.log4j.rolling.TimeBasedRollingPolicy">
       &lt;param name="FileNamePattern" value="/wombat/foo.%d{yyyy-MM}.gz"/>
     &lt;/rollingPolicy></b>
-
     &lt;layout class="org.apache.log4j.PatternLayout">
       &lt;param name="ConversionPattern" value="%c{1} - %m%n"/>
     &lt;/layout>
   &lt;/appender>
 
-  &lt;root">
+  &lt;root>
     &lt;appender-ref ref="ROLL"/>
   &lt;/root>
-
 &lt;/log4j:configuration>
 </pre>
 
@@ -69,34 +69,152 @@ namespace rolling
  * {@link TimeBasedRollingPolicy} for more details.
  *
  *
+ * Note: Do *not* set the option <code>Append</code> to <code>false</code>.
+ * Rolling over files is only relevant when you are appending.
  *
- *
- * */
-class LOG4CXX_EXPORT RollingFileAppender : public RollingFileAppenderSkeleton
+ */
+class LOG4CXX_EXPORT RollingFileAppender : public FileAppender
 {
 		DECLARE_LOG4CXX_OBJECT(RollingFileAppender)
 		BEGIN_LOG4CXX_CAST_MAP()
 		LOG4CXX_CAST_ENTRY(RollingFileAppender)
-		LOG4CXX_CAST_ENTRY_CHAIN(RollingFileAppenderSkeleton)
+		LOG4CXX_CAST_ENTRY_CHAIN(FileAppender)
 		END_LOG4CXX_CAST_MAP()
+	protected:
+		struct RollingFileAppenderPriv;
 
 	public:
+		/**
+		An unconfigured Appender.
+		*/
 		RollingFileAppender();
 
-		using RollingFileAppenderSkeleton::getRollingPolicy;
+		/** Returns the value of the <b>MaxBackupIndex</b> option. */
+		int getMaxBackupIndex() const;
 
-		using RollingFileAppenderSkeleton::getTriggeringPolicy;
+		/** Get the maximum size that the output file is allowed to reach before being rolled over to backup files. */
+		size_t getMaximumFileSize() const;
+
 
 		/**
-		 * Sets the rolling policy. In case the 'policy' argument also implements
-		 * {@link TriggeringPolicy}, then the triggering policy for this appender
-		 * is automatically set to be the policy argument.
-		 * @param policy
+		Set the maximum number of backup files to keep around.
+
+		<p>The <b>MaxBackupIndex</b> option determines how many backup
+		 files are kept before the oldest is erased. This option takes
+		 a positive integer value. If set to zero, then there will be no
+		 backup files and the log file will be truncated when it reaches <code>MaxFileSize</code>.
+		*/
+		void setMaxBackupIndex( int maxBackupIndex );
+
+		/**
+		Set the maximum size that the output file is allowed to reach before being rolled over to backup files.
+
+		<p>In configuration files, the <b>MaxFileSize</b> option takes an
+		 integer in the range 0 - 2^63. You can specify the value with the suffixes "KB", "MB" or "GB" so that the integer is
+		 interpreted being expressed respectively in kilobytes, megabytes
+		 or gigabytes. For example, the value "10KB" will be interpreted as 10240.
+		*/
+		void setMaxFileSize( const LogString& value );
+
+		void setMaximumFileSize( size_t value );
+
+		/**
+		   The <b>DatePattern</b> takes a string in the same format as
+		   expected by {@link log4cxx::helpers::SimpleDateFormat SimpleDateFormat}. This options determines the
+		   rollover schedule.
 		 */
-		using RollingFileAppenderSkeleton::setRollingPolicy;
+		void setDatePattern(const LogString& pattern);
 
-		using RollingFileAppenderSkeleton::setTriggeringPolicy;
+		LogString makeFileNamePattern(const LogString& datePattern);
 
+		/**
+		\copybrief FileAppender::setOption()
+
+		Supported options | Supported values | Default value |
+		:-------------- | :----------------: | :---------------: |
+		FileDatePattern | (\ref dateChars "1") | - |
+		MaxBackupIndex | 1-12 | 0 |
+		MaxFileSize | (\ref fileSz "2") | 10 MB |
+
+		\anchor dateChars (1) A pattern compatible with
+		  java.text.SimpleDateFormat, "ABSOLUTE", "DATE" or "ISO8601".
+		  For example, "HH:mm:ss,SSS", "dd MMM yyyy HH:mm:ss,SSS" or "DATE".
+
+		\anchor fileSz (2) An integer in the range 0 - 2^63.
+		 You can specify the value with the suffixes "KB", "MB" or "GB" so that the integer is
+		 interpreted being expressed respectively in kilobytes, megabytes
+		 or gigabytes. For example, the value "10KB" will be interpreted as 10240.
+
+		\sa FileAppender::setOption()
+		*/
+		void setOption( const LogString& option, const LogString& value ) override;
+
+		using spi::OptionHandler::activateOptions;
+		/**
+		\copybrief FileAppender::activateOptions()
+
+		\sa FileAppender::activateOptions()
+		*/
+		void activateOptions(  ) override;
+
+		/**
+		   Implements the configured roll over behaviour.
+
+		   <p>If <code>MaxBackupIndex</code> is positive, then files
+		   {<code>File.1</code>, ..., <code>File.MaxBackupIndex -1</code>}
+		   are renamed to {<code>File.2</code>, ...,
+		   <code>File.MaxBackupIndex</code>}. Moreover, <code>File</code> is
+		   renamed <code>File.1</code> and closed. A new <code>File</code> is
+		   created to receive further log output.
+
+		   <p>If <code>MaxBackupIndex</code> is equal to zero, then the
+		   <code>File</code> is truncated with no backup files created.
+
+		 */
+		bool rollover();
+
+	protected:
+		/**
+		An appender that uses the sub-classed \c priv instance data.
+		*/
+		RollingFileAppender( std::unique_ptr<RollingFileAppenderPriv> priv );
+
+		/**
+		 Rollover the file if required before calling WriterAppender::subAppend.
+		*/
+		void subAppend( const spi::LoggingEventPtr& event ) override;
+
+	public:
+		/**
+		 * The policy that implements the scheme for rolling over a log file.
+		 */
+		RollingPolicyPtr getRollingPolicy() const;
+
+		/**
+		 * The policy that determine when to trigger a log file rollover.
+		 */
+		TriggeringPolicyPtr getTriggeringPolicy() const;
+
+		/**
+		 * Use \c policy as the scheme for rolling over log files.
+		 *
+		 * Where the \c policy also implements
+		 * {@link TriggeringPolicy}, then \c policy
+		 * will be used to determine when to trigger a log file rollover.
+		 */
+		void setRollingPolicy(const RollingPolicyPtr& policy);
+
+		/**
+		 * Use \c policy to determine when to trigger a log file rollover.
+		 */
+		void setTriggeringPolicy(const TriggeringPolicyPtr& policy);
+
+	public:
+		/**
+		 * Get byte length of current active log file.
+		 * @return byte length of current active log file.
+		 */
+		size_t getFileLength() const;
 };
 
 LOG4CXX_PTR_DEF(RollingFileAppender);

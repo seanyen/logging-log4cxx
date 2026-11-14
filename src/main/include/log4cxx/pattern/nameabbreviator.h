@@ -21,7 +21,7 @@
 #include <log4cxx/logstring.h>
 #include <log4cxx/helpers/object.h>
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 namespace pattern
 {
@@ -35,7 +35,7 @@ LOG4CXX_PTR_DEF(NameAbbreviator);
  *
  *
  */
-class LOG4CXX_EXPORT NameAbbreviator : public log4cxx::helpers::Object
+class LOG4CXX_EXPORT NameAbbreviator : public LOG4CXX_NS::helpers::Object
 {
 	public:
 		DECLARE_ABSTRACT_LOG4CXX_OBJECT(NameAbbreviator)
@@ -70,10 +70,10 @@ class LOG4CXX_EXPORT NameAbbreviator : public log4cxx::helpers::Object
 		static NameAbbreviatorPtr getDefaultAbbreviator();
 
 		/**
-		 * Abbreviates a name in a StringBuffer.
-		 *
-		 * @param nameStart starting position of name in buf.
-		 * @param buf buffer, may not be null.
+		 * Modify \c buf by abbreviating the name at index \c nameStart.
+		 * @pre !buf.empty() && nameStart < buf.length()
+		 * @param nameStart an index into \c buf of the name.
+		 * @param buf string buffer containing name.
 		 */
 		virtual void abbreviate(LogString::size_type nameStart, LogString& buf) const = 0;
 

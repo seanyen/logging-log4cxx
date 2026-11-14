@@ -17,7 +17,9 @@
 
 #include "../logunit.h"
 #include <log4cxx/helpers/bytearrayoutputstream.h>
+#include <log4cxx/helpers/bytebuffer.h>
 #include <log4cxx/helpers/fileoutputstream.h>
+#include <log4cxx/rolling/rollingfileappender.h>
 #include <iostream>
 
 using namespace log4cxx;
@@ -33,7 +35,10 @@ LOGUNIT_CLASS(CastTestCase)
 	LOGUNIT_TEST_SUITE( CastTestCase );
 	LOGUNIT_TEST(testGoodCast);
 	LOGUNIT_TEST(testBadCast);
-
+	LOGUNIT_TEST(testNullParameter);
+	LOGUNIT_TEST(testRollingFileAppender);
+	LOGUNIT_TEST(testByteArrayOutputStreamWriteAfterDefaultConstruction);
+	LOGUNIT_TEST(testByteArrayOutputStreamIgnoresEmptyWrite);
 	LOGUNIT_TEST_SUITE_END();
 
 public:
@@ -57,6 +62,61 @@ public:
 		FileOutputStreamPtr fos = log4cxx::cast<FileOutputStream>(out);
 
 		LOGUNIT_ASSERT(!fos);
+	}
+
+	void testNullParameter()
+	{
+		OutputStreamPtr out = nullptr;
+
+		FileOutputStreamPtr fos = log4cxx::cast<FileOutputStream>(out);
+
+		LOGUNIT_ASSERT(!fos);
+	}
+
+	void testRollingFileAppender()
+	{
+		rolling::RollingFileAppenderPtr rolling = rolling::RollingFileAppenderPtr(new rolling::RollingFileAppender());
+
+		AppenderPtr appender = log4cxx::cast<Appender>(rolling);
+
+		LOGUNIT_ASSERT(appender);
+	}
+
+	/**
+	 * The default constructor of ByteArrayOutputStream left its private
+	 * unique_ptr default-initialised (nullptr), so the first call into
+	 * write() / toByteArray() dereferenced a null pointer. Verify that
+	 * a freshly constructed instance can accept input and round-trip it
+	 * back through toByteArray() without crashing.
+	 */
+	void testByteArrayOutputStreamWriteAfterDefaultConstruction()
+	{
+		ByteArrayOutputStreamPtr stream = std::make_shared<ByteArrayOutputStream>();
+
+		char payload[] = { 'l', 'o', 'g', '4', 'c', 'x', 'x' };
+		ByteBuffer buf(payload, sizeof(payload));
+
+		stream->write(buf);
+
+		ByteList result = stream->toByteArray();
+		LOGUNIT_ASSERT_EQUAL(sizeof(payload), result.size());
+		for (size_t i = 0; i < sizeof(payload); ++i)
+		{
+			LOGUNIT_ASSERT_EQUAL(static_cast<unsigned char>(payload[i]), result[i]);
+		}
+	}
+
+	void testByteArrayOutputStreamIgnoresEmptyWrite()
+	{
+		ByteArrayOutputStreamPtr stream = std::make_shared<ByteArrayOutputStream>();
+
+		char payload[] = { 'x' };
+		ByteBuffer buf(payload, 0);
+
+		stream->write(buf);
+
+		LOGUNIT_ASSERT_EQUAL(size_t(0), stream->toByteArray().size());
+		LOGUNIT_ASSERT_EQUAL(size_t(0), buf.remaining());
 	}
 
 };

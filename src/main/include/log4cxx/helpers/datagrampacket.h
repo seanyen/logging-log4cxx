@@ -20,8 +20,9 @@
 
 #include <log4cxx/helpers/object.h>
 #include <log4cxx/helpers/inetaddress.h>
+#include <cstddef>
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 namespace helpers
 {
@@ -35,21 +36,8 @@ and might arrive in any order.
 */
 class LOG4CXX_EXPORT DatagramPacket : public helpers::Object
 {
-	protected:
-		/** the data for this packet. */
-		void* buf;
-
-		/** The offset of the data for this packet. */
-		int offset;
-
-		/** The length of the data for this packet. */
-		int length;
-
-		/** The IP address for this packet. */
-		InetAddressPtr address;
-
-		/** The UDP port number of the remote host. */
-		int port;
+	private:
+		LOG4CXX_DECLARE_PRIVATE_MEMBER_PTR(DatagramPacketPriv, m_priv)
 
 	public:
 		DECLARE_ABSTRACT_LOG4CXX_OBJECT(DatagramPacket)
@@ -59,88 +47,55 @@ class LOG4CXX_EXPORT DatagramPacket : public helpers::Object
 
 		/** Constructs a DatagramPacket for receiving packets of length
 		<code>length</code>. */
-		DatagramPacket(void* buf, int length);
+		DatagramPacket(void* buf, size_t length);
 
 		/** Constructs a datagram packet for sending packets of length
 		<code>length</code> to the specified port number on the specified
 		host. */
-		DatagramPacket(void* buf, int length, InetAddressPtr address, int port);
+		DatagramPacket(void* buf, size_t length, const InetAddressPtr& address, int port);
 
 		/** Constructs a DatagramPacket for receiving packets of length
 		<code>length</code>, specifying an offset into the buffer. */
-		DatagramPacket(void* buf, int offset, int length);
+		DatagramPacket(void* buf, size_t offset, size_t length);
 
 		/** Constructs a datagram packet for sending packets of length
 		<code>length</code> with offset <code>offset</code> to the
 		specified port number on the specified host. */
-		DatagramPacket(void* buf, int offset, int length, InetAddressPtr address,
-			int port);
+		DatagramPacket(void* buf, size_t offset, size_t length, const InetAddressPtr& address, int port);
 
 		~DatagramPacket();
 
 		/** Returns the IP address of the machine to which this datagram
 		is being sent or from which the datagram was received. */
-		inline InetAddressPtr getAddress() const
-		{
-			return address;
-		}
+		InetAddressPtr getAddress() const;
 
 		/** Returns the data received or the data to be sent. */
-		inline void* getData() const
-		{
-			return buf;
-		}
+		void* getData() const;
 
 		/** Returns the length of the data to be sent or the length of the
 		data received. */
-		inline int getLength() const
-		{
-			return length;
-		}
+		size_t getLength() const;
 
 		/** Returns the offset of the data to be sent or the offset of the
 		data received. */
-		inline int getOffset() const
-		{
-			return offset;
-		}
+		size_t getOffset() const;
 
 		/** Returns the port number on the remote host to which this
 		 datagram is being sent or from which the datagram was received. */
-		inline int getPort() const
-		{
-			return port;
-		}
+		int getPort() const;
 
-		inline void setAddress(InetAddressPtr address1)
-		{
-			this->address = address1;
-		}
+		void setAddress(const InetAddressPtr& address1);
 
 		/** Set the data buffer for this packet. */
-		inline void setData(void* buf1)
-		{
-			this->buf = buf1;
-		}
+		void setData(void* buf1);
 
 		/** Set the data buffer for this packet. */
-		inline void setData(void* buf1, int offset1, int length1)
-		{
-			this->buf = buf1;
-			this->offset = offset1;
-			this->length = length1;
-		}
+		void setData(void* buf1, size_t offset1, size_t length1);
 
 		/** Set the length for this packet. */
-		inline void setLength(int length1)
-		{
-			this->length = length1;
-		}
+		void setLength(size_t length1);
 
-		inline void setPort(int port1)
-		{
-			this->port = port1;
-		}
+		void setPort(int port1);
 
 	private:
 		//

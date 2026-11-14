@@ -21,8 +21,9 @@
 #include <log4cxx/pattern/patternconverter.h>
 #include <log4cxx/spi/loggingevent.h>
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
+namespace helpers { class Pool; }
 
 namespace pattern
 {
@@ -45,6 +46,8 @@ class LOG4CXX_EXPORT LoggingEventPatternConverter : public PatternConverter
 		LoggingEventPatternConverter(
 			const LogString& name, const LogString& style);
 
+		LoggingEventPatternConverter(std::unique_ptr<PatternConverterPrivate> priv);
+
 	public:
 		DECLARE_LOG4CXX_PATTERN(LoggingEventPatternConverter)
 		BEGIN_LOG4CXX_CAST_MAP()
@@ -52,20 +55,20 @@ class LOG4CXX_EXPORT LoggingEventPatternConverter : public PatternConverter
 		LOG4CXX_CAST_ENTRY_CHAIN(PatternConverter)
 		END_LOG4CXX_CAST_MAP()
 
+		using PatternConverter::format;
 		/**
 		 * Formats an event into a string buffer.
-		 * @param event event to format, may not be null.
+		 * @param event holds the attributes, may not be null.
 		 * @param toAppendTo string buffer to which the formatted event will be appended.  May not be null.
-		 * @param p pool for memory allocations needing during format.
 		 */
-		virtual void format(
-			const log4cxx::spi::LoggingEventPtr& event,
-			LogString& toAppendTo,
-			log4cxx::helpers::Pool& p) const = 0;
+		virtual void format(const spi::LoggingEventPtr& event, LogString& toAppendTo) const = 0;
+		/**
+		@deprecated The \c pool parameter is not used and will be removed in a future version.
+		*/
+		[[deprecated("Use format() without a Pool parameter instead")]]
+		void format(const spi::LoggingEventPtr& event, LogString& toAppendTo, helpers::Pool& p) const;
 
-		void format(const log4cxx::helpers::ObjectPtr& obj,
-			LogString& toAppendTo,
-			log4cxx::helpers::Pool& p) const;
+		void format( const helpers::ObjectPtr& obj, LogString& toAppendTo ) const override;
 
 		/**
 		 * Normally pattern converters are not meant to handle Exceptions although

@@ -19,31 +19,67 @@
 #include <log4cxx/helpers/loglog.h>
 #include <log4cxx/helpers/optionconverter.h>
 #include <log4cxx/spi/loggingevent.h>
+#include <log4cxx/private/string_c11.h>
 #include <log4cxx/helpers/stringhelper.h>
 #include <log4cxx/helpers/stringtokenizer.h>
+#include <log4cxx/helpers/pool.h>
 #include <log4cxx/helpers/transcoder.h>
 #include <log4cxx/helpers/loader.h>
 #if !defined(LOG4CXX)
 	#define LOG4CXX 1
 #endif
 #include <log4cxx/private/log4cxx_private.h>
-
+#include <log4cxx/private/appenderskeleton_priv.h>
 
 
 #include <apr_strings.h>
 #include <vector>
 
-using namespace log4cxx;
-using namespace log4cxx::helpers;
-using namespace log4cxx::net;
-using namespace log4cxx::spi;
+using namespace LOG4CXX_NS;
+using namespace LOG4CXX_NS::helpers;
+using namespace LOG4CXX_NS::net;
+using namespace LOG4CXX_NS::spi;
 
 #if LOG4CXX_HAVE_LIBESMTP
 	#include <auth-client.h>
 	#include <libesmtp.h>
 #endif
 
-namespace log4cxx
+namespace
+{
+// RFC 5322 §2.1 defines header fields as CRLF-terminated lines, so an embedded
+// CR or LF in a configured Subject/From/To/Cc/Bcc value would split it across
+// header boundaries on the wire — a caller who controls a configured field
+// (e.g. through ${...} property substitution from an environment variable)
+// could inject arbitrary additional headers such as Bcc. The library already
+// owns SMTP wire-format sanitization (see SMTPSession::toAscii, which silently
+// rewrites non-ASCII to '?'); strip CR/LF in the public setters so the same
+// boundary is enforced regardless of how the value reaches the appender.
+LogString stripSmtpControl(const LogString& value, const logchar* field)
+{
+	if (value.find_first_of(LOG4CXX_STR("\r\n")) == LogString::npos)
+	{
+		return value;
+	}
+	LogString warning(LOG4CXX_STR("SMTPAppender "));
+	warning.append(field);
+	warning.append(LOG4CXX_STR(" contains CR or LF; stripping to prevent SMTP header injection."));
+	LogLog::warn(warning);
+	LogString out;
+	out.reserve(value.size());
+	for (auto ch : value)
+	{
+		if (ch != 0x0D && ch != 0x0A)
+		{
+			out.append(1, ch);
+		}
+	}
+	return out;
+}
+
+} // namespace
+
+namespace LOG4CXX_NS
 {
 namespace net
 {
@@ -60,6 +96,7 @@ namespace net
 class SMTPSession
 {
 	public:
+		class Message;
 		/**
 		*   Create new instance.
 		*/
@@ -67,13 +104,13 @@ class SMTPSession
 			int smtpPort,
 			const LogString& smtpUsername,
 			const LogString& smtpPassword,
-			Pool& p) : session(0), authctx(0),
-			user(toAscii(smtpUsername, p)),
-			pwd(toAscii(smtpPassword, p))
+			bool allowPlainTextAuth
+			)
+			: user{toAscii(smtpUsername, p)}
+			, pwd{toAscii(smtpPassword, p)}
 		{
 			auth_client_init();
 			session = smtp_create_session();
-
 			if (session == 0)
 			{
 				throw Exception("Could not initialize session.");
@@ -83,6 +120,8 @@ class SMTPSession
 			host.append(1, ':');
 			host.append(p.itoa(smtpPort));
 			smtp_set_server(session, host.c_str());
+			smtp_set_monitorcb(session, monitor_cb, (void*)this, 1);
+			smtp_set_eventcb(session, event_cb, (void*)this);
 
 			authctx = auth_create_context();
 			auth_set_mechanism_flags(authctx, AUTH_PLUGIN_PLAIN, 0);
@@ -90,6 +129,20 @@ class SMTPSession
 
 			if (*user || *pwd)
 			{
+				// Secure by default: never send AUTH credentials over an
+				// unencrypted connection. Require STARTTLS before
+				// authenticating unless the operator explicitly opted in
+				// to plain-text authentication via the
+				// AllowPlainTextAuthentication option.
+				if (!allowPlainTextAuth && !smtp_starttls_enable(session, Starttls_REQUIRED))
+				{
+					// The destructor does not run when a constructor throws
+					smtp_destroy_session(session);
+					auth_destroy_context(authctx);
+					throw Exception("SMTPAppender: STARTTLS is unavailable in this libESMTP build;"
+						" refusing to send SMTP credentials in clear text."
+						" Set AllowPlainTextAuthentication=true to override.");
+				}
 				smtp_auth_set_context(session, authctx);
 			}
 		}
@@ -100,17 +153,26 @@ class SMTPSession
 			auth_destroy_context(authctx);
 		}
 
-		void send(Pool& p)
+		void send()
 		{
 			int status = smtp_start_session(session);
 
 			if (!status)
 			{
-				size_t bufSize = 128;
-				char* buf = p.pstralloc(bufSize);
-				smtp_strerror(smtp_errno(), buf, bufSize);
-				throw Exception(buf);
+				static const size_t smtp_msgSize = 128;
+				char smtp_msg[smtp_msgSize];
+				smtp_strerror(smtp_errno(), smtp_msg, smtp_msgSize);
+				char msg[2 * smtp_msgSize];
+				snprintf(msg, sizeof (msg), "%s (sessionState %d isActive? %d tlsStarted? %d)"
+					, smtp_msg, sessionState, isActive, tlsStarted);
+				throw Exception(msg);
 			}
+			else if (incorrectAuthentication)
+				throw Exception("Incorrect authentication data");
+			else if (relayDenied)
+				throw Exception("Relay Denied");
+			else if (!certificateProblem.empty())
+				throw Exception(("X509 error: " + certificateProblem).c_str());
 		}
 
 		operator smtp_session_t()
@@ -123,12 +185,8 @@ class SMTPSession
 			char* buf = p.pstralloc(str.length() + 1);
 			char* current = buf;
 
-			for (LogString::const_iterator iter = str.begin();
-				iter != str.end();
-				iter++)
+			for (unsigned int c : str)
 			{
-				unsigned int c = *iter;
-
 				if (c > 0x7F)
 				{
 					c = '?';
@@ -144,10 +202,17 @@ class SMTPSession
 	private:
 		SMTPSession(SMTPSession&);
 		SMTPSession& operator=(SMTPSession&);
-		smtp_session_t session;
-		auth_context_t authctx;
+		Pool p;
+		smtp_session_t session{0};
+		auth_context_t authctx{0};
 		char* user;
 		char* pwd;
+		int sessionState{0};
+		bool isActive{false};
+		bool tlsStarted{false};
+		bool incorrectAuthentication{false};
+		bool relayDenied{false};
+		std::string certificateProblem;
 
 		/**
 		 *   This method is called if the SMTP server requests authentication.
@@ -155,7 +220,7 @@ class SMTPSession
 		static int authinteract(auth_client_request_t request, char** result, int fields,
 			void* arg)
 		{
-			SMTPSession* pThis = (SMTPSession*) arg;
+			auto pThis = static_cast<SMTPSession*>(arg);
 
 			for (int i = 0; i < fields; i++)
 			{
@@ -174,48 +239,182 @@ class SMTPSession
 			return 1;
 		}
 
+		static void monitor_cb(const char *buf, int buflen, int writing, void *arg)
+		{
+			auto pThis = static_cast<SMTPSession*>(arg);
+			if (writing)
+				pThis->isActive = true;
+			else if (auto smtp_response = atoi(buf))
+			{
+				if (535 == smtp_response)
+					pThis->incorrectAuthentication = true;
+				if (550 == smtp_response)
+					pThis->relayDenied = true;
+			}
 
+			if (LogLog::isDebugEnabled())
+			{
+				while (0 < buflen && std::isspace(buf[buflen - 1]))
+					--buflen;
+				std::string data(buf, buflen);
+				LOG4CXX_DECODE_CHAR(lsData, data);
+				LogString type = writing ? LOG4CXX_STR("send") : LOG4CXX_STR("recv");
+				LogLog::debug(LOG4CXX_STR("SMTP ") + type + LOG4CXX_STR(" [") + lsData + LOG4CXX_STR("]"));
+			}
+		}
+
+		static void event_cb (smtp_session_t session /* unused */, int event_no, void *arg,...)
+		{
+			auto pThis = static_cast<SMTPSession*>(arg);
+			va_list alist;
+			va_start(alist, arg);
+			switch (event_no)
+			{
+			case SMTP_EV_CONNECT:
+			case SMTP_EV_MAILSTATUS:
+			case SMTP_EV_RCPTSTATUS:
+			case SMTP_EV_MESSAGEDATA:
+			case SMTP_EV_MESSAGESENT:
+			case SMTP_EV_DISCONNECT:
+				pThis->sessionState = event_no;
+				break;
+			case SMTP_EV_WEAK_CIPHER:
+			{
+				auto bitsRequired = va_arg(alist, long);
+				pThis->certificateProblem = "weak cipher";
+				if (auto ok = va_arg(alist, int*))
+					*ok = 1; // Accept the problem
+				break;
+			}
+			case SMTP_EV_STARTTLS_OK:
+				pThis->tlsStarted = true;
+				break;
+			case SMTP_EV_INVALID_PEER_CERTIFICATE:
+				pThis->certificateProblem = get_X509_error(va_arg(alist, long));
+				if (auto ok = va_arg(alist, int*))
+					*ok = 1; // Accept the problem
+				break;
+			case SMTP_EV_NO_PEER_CERTIFICATE:
+				pThis->certificateProblem = "no peer certificate";
+				if (auto ok = va_arg(alist, int*))
+					*ok = 1;
+				break;
+			case SMTP_EV_WRONG_PEER_CERTIFICATE:
+				pThis->certificateProblem = "wrong peer certificate";
+				if (auto ok = va_arg(alist, int*))
+					*ok = 1; // Accept the problem
+				break;
+			case SMTP_EV_NO_CLIENT_CERTIFICATE:
+				pThis->certificateProblem = "no client certificate";
+				if (auto ok = va_arg(alist, int*))
+					*ok = 1; // Accept the problem
+				break;
+			}
+			va_end(alist);
+		}
+
+		static std::string get_X509_error(long verifyResult)
+		{
+			switch (verifyResult)
+			{
+			case 2: return "unable to get issuer cert";
+			case 3: return "unable to get crl";
+			case 4: return "unable to decrypt cert signature";
+			case 5: return "unable to decrypt crl signature";
+			case 6: return "unable to decode issuer public key";
+			case 7: return "cert signature failure";
+			case 8: return "crl signature failure";
+			case 9: return "cert not yet valid";
+			case 10: return "cert has expired";
+			case 11: return "crl not yet valid";
+			case 12: return "crl has expired";
+			case 13: return "error in cert not before field";
+			case 14: return "error in cert not after field";
+			case 15: return "error in crl last update field";
+			case 16: return "error in crl next update field";
+			case 17: return "out of mem";
+			case 18: return "depth zero self signed cert";
+			case 19: return "self signed cert in chain";
+			case 20: return "unable to get issuer cert locally";
+			case 21: return "unable to verify leaf signature";
+			case 22: return "cert chain too long";
+			case 23: return "cert revoked";
+			case 24: return "invalid ca";
+			case 25: return "path length exceeded";
+			case 26: return "invalid purpose";
+			case 27: return "cert untrusted";
+			case 28: return "cert rejected";
+			case 29: return "subject issuer mismatch";
+			case 30: return "akid skid mismatch";
+			case 31: return "akid issuer serial mismatch";
+			case 32: return "keyusage no certsign";
+			case 33: return "unable to get crl issuer";
+			case 34: return "unhandled critical extension";
+			case 35: return "keyusage no crl sign";
+			case 36: return "unhandled critical crl extension";
+			case 37: return "invalid non ca";
+			case 38: return "proxy path length exceeded";
+			case 39: return "keyusage no digital signature";
+			case 40: return "proxy certificates not allowed";
+			case 41: return "invalid extension";
+			case 42: return "invalid policy extension";
+			case 43: return "no explicit policy";
+			case 44: return "different crl scope";
+			case 45: return "unsupported extension feature";
+			case 46: return "unnested resource";
+			case 47: return "permitted violation";
+			case 48: return "excluded violation";
+			case 49: return "subtree minmax";
+			case 51: return "unsupported constraint type";
+			case 52: return "unsupported constraint syntax";
+			case 53: return "unsupported name syntax";
+			case 54: return "crl path validation error";
+			case 50: return "application verification";
+			}
+			return "unknown";
+		}
 };
 
 /**
  *  A message in an SMTP session.
  */
-class SMTPMessage
+class SMTPSession::Message
 {
 	public:
-		SMTPMessage(SMTPSession& session,
+		Message(SMTPSession& session,
 			const LogString& from,
 			const LogString& to,
 			const LogString& cc,
 			const LogString& bcc,
 			const LogString& subject,
-			const LogString msg, Pool& p)
+			const LogString& msg)
 		{
 			message = smtp_add_message(session);
-			body = current = toMessage(msg, p);
+			body = current = toMessage(msg, session.p, current_len);
 			messagecbState = 0;
-			smtp_set_reverse_path(message, toAscii(from, p));
-			addRecipients(to, "To", p);
-			addRecipients(cc, "Cc", p);
-			addRecipients(bcc, "Bcc", p);
+			smtp_set_reverse_path(message, toAscii(from, session.p));
+			addRecipients(to, "To", session.p);
+			addRecipients(cc, "Cc", session.p);
+			addRecipients(bcc, "Bcc", session.p);
 
 			if (!subject.empty())
 			{
-				smtp_set_header(message, "Subject", toAscii(subject, p));
+				smtp_set_header(message, "Subject", toAscii(subject, session.p));
 			}
 
 			smtp_set_messagecb(message, messagecb, this);
 		}
-		~SMTPMessage()
+		~Message()
 		{
 		}
 
 	private:
-		SMTPMessage(const SMTPMessage&);
-		SMTPMessage& operator=(const SMTPMessage&);
+		Message(const Message&);
+		Message& operator=(const Message&);
 		smtp_message_t message;
 		const char* body;
 		const char* current;
+		size_t current_len;
 		int messagecbState;
 		void addRecipients(const LogString& addresses, const char* field, Pool& p)
 		{
@@ -241,8 +440,9 @@ class SMTPMessage
 		/**
 		 *   Message bodies can only contain US-ASCII characters and
 		 *   CR and LFs can only occur together.
+		 *   On return \c lenOut holds the length of the converted body.
 		 */
-		static const char* toMessage(const LogString& str, Pool& p)
+		static const char* toMessage(const LogString& str, Pool& p, size_t& lenOut)
 		{
 			//
 			//    count the number of carriage returns and line feeds
@@ -261,20 +461,18 @@ class SMTPMessage
 			char* retval = p.pstralloc(str.length() + feedCount + 1);
 			char* current = retval;
 			char* startOfLine = current;
+			unsigned int ignoreChar = 0;
 
 			//
 			//    iterator through message
 			//
-			for (LogString::const_iterator iter = str.begin();
-				iter != str.end();
-				iter++)
+			for (unsigned int c : str)
 			{
-				unsigned int c = *iter;
-
 				//
-				//   replace non-ASCII characters with '?'
+				//   replace non-ASCII characters and embedded NULs with '?'
+				//   (a NUL octet must never act as a body terminator)
 				//
-				if (c > 0x7F)
+				if (c > 0x7F || c == 0)
 				{
 					*current++ = 0x3F; // '?'
 				}
@@ -283,14 +481,14 @@ class SMTPMessage
 					//
 					//   replace any stray CR or LF with CRLF
 					//      reset start of line
-					*current++ = 0x0D;
-					*current++ = 0x0A;
-					startOfLine = current;
-					LogString::const_iterator next = iter + 1;
-
-					if (next != str.end() && (*next == 0x0A || *next == 0x0D))
+					if (c == ignoreChar && current == startOfLine)
+						ignoreChar = 0;
+					else
 					{
-						iter++;
+						*current++ = 0x0D;
+						*current++ = 0x0A;
+						startOfLine = current;
+						ignoreChar = (c == 0x0A ? 0x0D : 0x0A);
 					}
 				}
 				else
@@ -306,6 +504,7 @@ class SMTPMessage
 			}
 
 			*current = 0;
+			lenOut = current - retval;
 			return retval;
 		}
 
@@ -316,7 +515,7 @@ class SMTPMessage
 		{
 			*ctx = 0;
 			const char* retval = 0;
-			SMTPMessage* pThis = (SMTPMessage*) arg;
+			auto pThis = static_cast<SMTPSession::Message*>(arg);
 
 			//   rewind message
 			if (len == NULL)
@@ -333,7 +532,11 @@ class SMTPMessage
 
 				if (pThis->current)
 				{
-					*len = strlen(pThis->current);
+					// Use the stored post-conversion length: strnlen_s over the
+					// pre-conversion length truncates at an embedded NUL and
+					// undercounts the CRLF-expanded body, silently dropping the
+					// newest content from the alert email.
+					*len = static_cast<int>(pThis->current_len);
 				}
 
 				retval = pThis->current;
@@ -346,9 +549,8 @@ class SMTPMessage
 };
 #endif
 
-class LOG4CXX_EXPORT DefaultEvaluator :
-	public virtual spi::TriggeringEventEvaluator,
-	public virtual helpers::Object
+class LOG4CXX_EXPORT DefaultEvaluator
+	: public spi::TriggeringEventEvaluator
 {
 	public:
 		DECLARE_LOG4CXX_OBJECT(DefaultEvaluator)
@@ -365,7 +567,7 @@ class LOG4CXX_EXPORT DefaultEvaluator :
 		has ERROR level or higher. Otherwise it returns
 		<code>false</code>.
 		*/
-		virtual bool isTriggeringEvent(const spi::LoggingEventPtr& event);
+		bool isTriggeringEvent(const spi::LoggingEventPtr& event) override;
 	private:
 		DefaultEvaluator(const DefaultEvaluator&);
 		DefaultEvaluator& operator=(const DefaultEvaluator&);
@@ -377,6 +579,45 @@ class LOG4CXX_EXPORT DefaultEvaluator :
 IMPLEMENT_LOG4CXX_OBJECT(DefaultEvaluator)
 IMPLEMENT_LOG4CXX_OBJECT(SMTPAppender)
 
+struct SMTPAppender::SMTPPriv : public AppenderSkeletonPrivate
+{
+	SMTPPriv() :
+		AppenderSkeletonPrivate(),
+		smtpPort(25),
+		bufferSize(512),
+		locationInfo(false),
+		cb(bufferSize),
+		evaluator(new DefaultEvaluator()) {}
+
+	SMTPPriv(const spi::TriggeringEventEvaluatorPtr& evaluator) :
+		AppenderSkeletonPrivate(),
+		smtpPort(25),
+		bufferSize(512),
+		locationInfo(false),
+		cb(bufferSize),
+		evaluator(evaluator) {}
+
+	LogString to;
+	LogString cc;
+	LogString bcc;
+	LogString from;
+	LogString subject;
+	LogString smtpHost;
+	LogString smtpUsername;
+	LogString smtpPassword;
+	int smtpPort;
+	int bufferSize; // 512
+	bool locationInfo;
+	helpers::CyclicBuffer cb;
+	spi::TriggeringEventEvaluatorPtr evaluator;
+	// Whether AUTH credentials may be sent without STARTTLS (see setOption)
+	bool allowPlainTextAuth{false};
+
+	void sendBuffer();
+};
+
+#define _priv static_cast<SMTPPriv*>(m_priv.get())
+
 DefaultEvaluator::DefaultEvaluator()
 {
 }
@@ -387,100 +628,93 @@ bool DefaultEvaluator::isTriggeringEvent(const spi::LoggingEventPtr& event)
 }
 
 SMTPAppender::SMTPAppender()
-	: smtpPort(25), bufferSize(512), locationInfo(false), cb(bufferSize),
-	  evaluator(new DefaultEvaluator())
+	: AppenderSkeleton (std::make_unique<SMTPPriv>())
 {
 }
 
 /**
 Use <code>evaluator</code> passed as parameter as the
 TriggeringEventEvaluator for this SMTPAppender.  */
-SMTPAppender::SMTPAppender(spi::TriggeringEventEvaluatorPtr evaluator)
-	: smtpPort(25), bufferSize(512), locationInfo(false), cb(bufferSize),
-	  evaluator(evaluator)
+SMTPAppender::SMTPAppender(const spi::TriggeringEventEvaluatorPtr& evaluator)
+	: AppenderSkeleton (std::make_unique<SMTPPriv>(evaluator))
 {
 }
 
 SMTPAppender::~SMTPAppender()
 {
-	finalize();
+	if (_priv->setClosed())
+		_priv->shutdown();
 }
-
-bool SMTPAppender::requiresLayout() const
-{
-	return true;
-}
-
 
 LogString SMTPAppender::getFrom() const
 {
-	return from;
+	return _priv->from;
 }
 
 void SMTPAppender::setFrom(const LogString& newVal)
 {
-	from = newVal;
+	_priv->from = stripSmtpControl(newVal, LOG4CXX_STR("From"));
 }
 
 
 LogString SMTPAppender::getSubject() const
 {
-	return subject;
+	return _priv->subject;
 }
 
 void SMTPAppender::setSubject(const LogString& newVal)
 {
-	subject = newVal;
+	_priv->subject = stripSmtpControl(newVal, LOG4CXX_STR("Subject"));
 }
 
 LogString SMTPAppender::getSMTPHost() const
 {
-	return smtpHost;
+	return _priv->smtpHost;
 }
 
 void SMTPAppender::setSMTPHost(const LogString& newVal)
 {
-	smtpHost = newVal;
+	_priv->smtpHost = newVal;
 }
 
 int SMTPAppender::getSMTPPort() const
 {
-	return smtpPort;
+	return _priv->smtpPort;
 }
 
 void SMTPAppender::setSMTPPort(int newVal)
 {
-	smtpPort = newVal;
+	_priv->smtpPort = newVal;
 }
 
 bool SMTPAppender::getLocationInfo() const
 {
-	return locationInfo;
+	return _priv->locationInfo;
 }
 
 void SMTPAppender::setLocationInfo(bool newVal)
 {
-	locationInfo = newVal;
+	_priv->locationInfo = newVal;
 }
 
 LogString SMTPAppender::getSMTPUsername() const
 {
-	return smtpUsername;
+	return _priv->smtpUsername;
 }
 
 void SMTPAppender::setSMTPUsername(const LogString& newVal)
 {
-	smtpUsername = newVal;
+	_priv->smtpUsername = newVal;
 }
 
 LogString SMTPAppender::getSMTPPassword() const
 {
-	return smtpPassword;
+	return _priv->smtpPassword;
 }
 
 void SMTPAppender::setSMTPPassword(const LogString& newVal)
 {
-	smtpPassword = newVal;
+	_priv->smtpPassword = newVal;
 }
 
 
@@ -534,6 +768,12 @@ void SMTPAppender::setOption(const LogString& option,
 	{
 		setSMTPPort(OptionConverter::toInt(value, 25));
 	}
+	else if (StringHelper::equalsIgnoreCase(option, LOG4CXX_STR("ALLOWPLAINTEXTAUTHENTICATION"), LOG4CXX_STR("allowplaintextauthentication")))
+	{
+		// Explicit opt-out from the STARTTLS-before-AUTH requirement;
+		// only for servers that cannot offer TLS on a trusted network.
+		_priv->allowPlainTextAuth = OptionConverter::toBoolean(value, false);
+	}
 	else
 	{
 		AppenderSkeleton::setOption(option, value);
@@ -543,11 +783,9 @@ void SMTPAppender::setOption(const LogString& option,
 
 bool SMTPAppender::asciiCheck(const LogString& value, const LogString& field)
 {
-	for (LogString::const_iterator iter = value.begin();
-		iter != value.end();
-		iter++)
+	for (unsigned int item : value)
 	{
-		if (0x7F < (unsigned int) *iter)
+		if (0x7F < item)
 		{
 			LogLog::warn(field + LOG4CXX_STR(" contains non-ASCII character"));
 			return false;
@@ -560,75 +798,60 @@ bool SMTPAppender::asciiCheck(const LogString& value, const LogString& field)
 /**
 Activate the specified options, such as the smtp host, the
 recipient, from, etc. */
-void SMTPAppender::activateOptions(Pool& p)
+void SMTPAppender::activateOptions(  )
 {
-	bool activate = true;
-
-	if (layout == 0)
+	if (_priv->layout == 0)
 	{
-		errorHandler->error(LOG4CXX_STR("No layout set for appender named [") + name + LOG4CXX_STR("]."));
-		activate = false;
+		_priv->errorHandler->error(LOG4CXX_STR("No layout set for appender named [") + _priv->name + LOG4CXX_STR("]."));
 	}
 
-	if (evaluator == 0)
+	if (_priv->evaluator == 0)
 	{
-		errorHandler->error(LOG4CXX_STR("No TriggeringEventEvaluator is set for appender [") +
-			name + LOG4CXX_STR("]."));
-		activate = false;
+		_priv->errorHandler->error(LOG4CXX_STR("No TriggeringEventEvaluator is set for appender [") +
+			_priv->name + LOG4CXX_STR("]."));
 	}
 
-	if (smtpHost.empty())
+	if (_priv->smtpHost.empty())
 	{
-		errorHandler->error(LOG4CXX_STR("No smtpHost is set for appender [") +
-			name + LOG4CXX_STR("]."));
-		activate = false;
+		_priv->errorHandler->error(LOG4CXX_STR("No smtpHost is set for appender [") +
+			_priv->name + LOG4CXX_STR("]."));
 	}
 
-	if (to.empty() && cc.empty() && bcc.empty())
+	if (_priv->to.empty() && _priv->cc.empty() && _priv->bcc.empty())
 	{
-		errorHandler->error(LOG4CXX_STR("No recipient address is set for appender [") +
-			name + LOG4CXX_STR("]."));
-		activate = false;
+		_priv->errorHandler->error(LOG4CXX_STR("No recipient address is set for appender [") +
+			_priv->name + LOG4CXX_STR("]."));
 	}
 
-	activate &= asciiCheck(to, LOG4CXX_STR("to"));
-	activate &= asciiCheck(cc, LOG4CXX_STR("cc"));
-	activate &= asciiCheck(bcc, LOG4CXX_STR("bcc"));
-	activate &= asciiCheck(from, LOG4CXX_STR("from"));
+	asciiCheck(_priv->to, LOG4CXX_STR("to"));
+	asciiCheck(_priv->cc, LOG4CXX_STR("cc"));
+	asciiCheck(_priv->bcc, LOG4CXX_STR("bcc"));
+	asciiCheck(_priv->from, LOG4CXX_STR("from"));
 
 #if !LOG4CXX_HAVE_LIBESMTP
-	errorHandler->error(LOG4CXX_STR("log4cxx built without SMTP support."));
-	activate = false;
+	_priv->errorHandler->error(LOG4CXX_STR("log4cxx built without SMTP support."));
 #endif
-
-	if (activate)
-	{
-		AppenderSkeleton::activateOptions(p);
-	}
 }
 
 /**
 Perform SMTPAppender specific appending actions, mainly adding
 the event to a cyclic buffer and checking if the event triggers
 an e-mail to be sent. */
-void SMTPAppender::append(const spi::LoggingEventPtr& event, Pool& p)
+void SMTPAppender::append( const spi::LoggingEventPtr& event )
 {
 	if (!checkEntryConditions())
 	{
 		return;
 	}
 
-	LogString ndc;
-	event->getNDC(ndc);
-	event->getThreadName();
-	// Get a copy of this thread's MDC.
-	event->getMDCCopy();
+	// Get a copy of this thread's diagnostic context
+	event->LoadDC();
 
-	cb.add(event);
+	_priv->cb.add(event);
 
-	if (evaluator->isTriggeringEvent(event))
+	if (_priv->evaluator->isTriggeringEvent(event))
 	{
-		sendBuffer(p);
+		_priv->sendBuffer();
 	}
 }
 
@@ -641,23 +864,24 @@ bool SMTPAppender::checkEntryConditions()
 {
 #if LOG4CXX_HAVE_LIBESMTP
 
-	if ((to.empty() && cc.empty() && bcc.empty()) || from.empty() || smtpHost.empty())
+	if ((_priv->to.empty() && _priv->cc.empty() && _priv->bcc.empty()) || _priv->from.empty() || _priv->smtpHost.empty())
 	{
-		errorHandler->error(LOG4CXX_STR("Message not configured."));
+		_priv->errorHandler->error(LOG4CXX_STR("Required SMTP properties missing for appender [") +
+			_priv->name + LOG4CXX_STR("]."));
 		return false;
 	}
 
-	if (evaluator == 0)
+	if (_priv->evaluator == 0)
 	{
-		errorHandler->error(LOG4CXX_STR("No TriggeringEventEvaluator is set for appender [") +
-			name + LOG4CXX_STR("]."));
+		_priv->errorHandler->error(LOG4CXX_STR("No TriggeringEventEvaluator is set for appender [") +
+			_priv->name + LOG4CXX_STR("]."));
 		return false;
 	}
 
 
-	if (layout == 0)
+	if (_priv->layout == 0)
 	{
-		errorHandler->error(LOG4CXX_STR("No layout set for appender named [") + name + LOG4CXX_STR("]."));
+		_priv->errorHandler->error(LOG4CXX_STR("No layout set for appender named [") + _priv->name + LOG4CXX_STR("]."));
 		return false;
 	}
 
@@ -667,78 +891,75 @@ bool SMTPAppender::checkEntryConditions()
 #endif
 }
 
-
-
-void SMTPAppender::close()
-{
-	this->closed = true;
-}
-
 LogString SMTPAppender::getTo() const
 {
-	return to;
+	return _priv->to;
 }
 
 void SMTPAppender::setTo(const LogString& addressStr)
 {
-	to = addressStr;
+	_priv->to = stripSmtpControl(addressStr, LOG4CXX_STR("To"));
 }
 
 LogString SMTPAppender::getCc() const
 {
-	return cc;
+	return _priv->cc;
 }
 
 void SMTPAppender::setCc(const LogString& addressStr)
 {
-	cc = addressStr;
+	_priv->cc = stripSmtpControl(addressStr, LOG4CXX_STR("Cc"));
 }
 
 LogString SMTPAppender::getBcc() const
 {
-	return bcc;
+	return _priv->bcc;
 }
 
 void SMTPAppender::setBcc(const LogString& addressStr)
 {
-	bcc = addressStr;
+	_priv->bcc = stripSmtpControl(addressStr, LOG4CXX_STR("Bcc"));
 }
 
 /**
 Send the contents of the cyclic buffer as an e-mail message.
 */
-void SMTPAppender::sendBuffer(Pool& p)
+void SMTPAppender::SMTPPriv::sendBuffer()
 {
 #if LOG4CXX_HAVE_LIBESMTP
 
-	// Note: this code already owns the monitor for this
-	// appender. This frees us from needing to synchronize on 'cb'.
+	// This thread owns the mutex for this appender, hence no need to synchronize on 'cb'.
 	try
 	{
 		LogString sbuf;
-		layout->appendHeader(sbuf, p);
+		this->layout->appendHeader(sbuf);
 
-		int len = cb.length();
+		int len = this->cb.length();
 
 		for (int i = 0; i < len; i++)
 		{
-			LoggingEventPtr event = cb.get();
-			layout->format(sbuf, event, p);
+			LoggingEventPtr event = this->cb.get();
+			this->layout->format(sbuf, event);
 		}
 
-		layout->appendFooter(sbuf, p);
+		this->layout->appendFooter(sbuf);
 
-		SMTPSession session(smtpHost, smtpPort, smtpUsername, smtpPassword, p);
+		SMTPSession session(this->smtpHost, this->smtpPort, this->smtpUsername, this->smtpPassword, this->allowPlainTextAuth);
 
-		SMTPMessage message(session, from, to, cc,
-			bcc, subject, sbuf, p);
+		SMTPSession::Message message(session, this->from, this->to, this->cc,
+			this->bcc, this->subject, sbuf);
 
-		session.send(p);
+		session.send();
 
 	}
-	catch (std::exception& e)
+	catch (const std::exception& e)
 	{
-		LogLog::error(LOG4CXX_STR("Error occured while sending e-mail notification."), e);
+		this->errorHandler->error
+			( LOG4CXX_STR("Error occured while sending e-mail to [")
+			+ this->smtpHost + LOG4CXX_STR("].")
+			, e
+			, spi::ErrorCode::WRITE_FAILURE
+			);
 	}
 
 #endif
@@ -749,17 +970,17 @@ Returns value of the <b>EvaluatorClass</b> option.
 */
 LogString SMTPAppender::getEvaluatorClass()
 {
-	return evaluator == 0 ? LogString() : evaluator->getClass().getName();
+	return _priv->evaluator == 0 ? LogString() : _priv->evaluator->getClass().getName();
 }
 
-log4cxx::spi::TriggeringEventEvaluatorPtr SMTPAppender::getEvaluator() const
+LOG4CXX_NS::spi::TriggeringEventEvaluatorPtr SMTPAppender::getEvaluator() const
 {
-	return evaluator;
+	return _priv->evaluator;
 }
 
-void SMTPAppender::setEvaluator(log4cxx::spi::TriggeringEventEvaluatorPtr& trigger)
+void SMTPAppender::setEvaluator(const spi::TriggeringEventEvaluatorPtr& trigger)
 {
-	evaluator = trigger;
+	_priv->evaluator = trigger;
 }
 
 /**
@@ -771,8 +992,13 @@ buffer. By default the size of the cyclic buffer is 512 events.
 */
 void SMTPAppender::setBufferSize(int sz)
 {
-	this->bufferSize = sz;
-	cb.resize(sz);
+	if (sz < 1)
+	{
+		sz = 1;
+	}
+
+	_priv->bufferSize = sz;
+	_priv->cb.resize(sz);
 }
 
 /**
@@ -785,6 +1011,10 @@ for the SMTPAppender.
 void SMTPAppender::setEvaluatorClass(const LogString& value)
 {
 	ObjectPtr obj = ObjectPtr(Loader::loadClass(value).newInstance());
-	evaluator = log4cxx::cast<TriggeringEventEvaluator>(obj);
+	_priv->evaluator = LOG4CXX_NS::cast<TriggeringEventEvaluator>(obj);
 }
 
+int SMTPAppender::getBufferSize() const
+{
+	return _priv->bufferSize;
+}

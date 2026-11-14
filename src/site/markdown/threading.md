@@ -22,18 +22,21 @@ Threading {#threading}
 -->
 [TOC]
 
-# Threading Notes with Log4cxx {#threading-notes}
+Log4cxx is designed to be thread-safe under under normal usage.
+This means that multiple threads can concurrently send logging events to an appender.
 
-Log4cxx is designed to be thread-safe under under normal usage.  This
-means that logging itself is always thread-safe, however there are
-certain circumstances that can cause threading issues with Log4cxx.
+Log4cxx *requires* that configuration occurs in a single-threaded context
+(typically during application startup before worker threads are spawned
+or in a single watch-dog thread).
+
+However there are certain circumstances that can cause threading issues with Log4cxx.
 
 ## Unexpected Exit {#unexpected-exit}
 
 In multithreaded applications, it is possible to call `exit()` from any
 thread in the application.  When this happens, other threads in the
 application may continue to run and attempt to log information.  As of
-version 12 of Log4cxx, this should not cause the library to crash.
+version 0.12.0 of Log4cxx, this should not cause the library to crash.
 
 We recommend that a graceful exit be performed whenever possible, and that
 all threads be terminated properly before returning from `main()`.
@@ -87,7 +90,7 @@ In the event that you need special signal handling, you can implement your own
 functions, and use the [ThreadUtility::configureFuncs](@ref log4cxx.helpers.ThreadUtility.configureFuncs) method in order to
 customize exactly what happens.
 
-### Configuring Thread {#configuring}
+### Runtime Configuration{#configuring}
 
 To tell Log4cxx what to do by default when starting a new thread, the enum
 [ThreadConfigurationType](@ref log4cxx.helpers.ThreadConfigurationType) may be

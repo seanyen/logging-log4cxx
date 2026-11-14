@@ -20,7 +20,7 @@
 
 #include <log4cxx/logger.h>
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 
 namespace spi
@@ -32,11 +32,13 @@ a sub-class of Logger.
 class LOG4CXX_EXPORT LoggerFactory : public virtual helpers::Object
 {
 	public:
-		DECLARE_ABSTRACT_LOG4CXX_OBJECT(LoggerFactory)
+		DECLARE_LOG4CXX_OBJECT(LoggerFactory)
+		BEGIN_LOG4CXX_CAST_MAP()
+		LOG4CXX_CAST_ENTRY(LoggerFactory)
+		END_LOG4CXX_CAST_MAP()
 		virtual ~LoggerFactory() {}
-		virtual LoggerPtr makeNewLoggerInstance(
-			log4cxx::helpers::Pool& pool,
-			const LogString& name) const = 0;
+
+		virtual LoggerPtr makeNewLoggerInstance(const LogString& name) const;
 };
 
 

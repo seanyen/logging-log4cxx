@@ -66,23 +66,17 @@ public:
 	LogString format(const LogString & pattern,
 		const ObjectPtr & obj)
 	{
-		std::vector<PatternConverterPtr> converters;
-		std::vector<FormattingInfoPtr> fields;
 		PatternMap rules;
 		rules.insert(PatternMap::value_type(LOG4CXX_STR("d"), (PatternConstructor) FileDatePatternConverter::newInstance));
 		rules.insert(PatternMap::value_type(LOG4CXX_STR("i"), (PatternConstructor) IntegerPatternConverter::newInstance));
-		PatternParser::parse(pattern, converters, fields, rules);
+		auto converters = PatternParser::parse(pattern, rules);
 		LogString result;
-		Pool pool;
-		std::vector<FormattingInfoPtr>::const_iterator fieldIter = fields.begin();
 
-		for (std::vector<PatternConverterPtr>::const_iterator converterIter = converters.begin();
-			converterIter != converters.end();
-			converterIter++, fieldIter++)
+		for (auto item :  converters)
 		{
-			LogString::size_type i = result.length();
-			(*converterIter)->format(obj, result, pool);
-			(*fieldIter)->format(i, result);
+			auto fieldStart = result.length();
+			item->format(obj, result);
+			item->getFormattingInfo().adjustField(fieldStart, result);
 		}
 
 		return result;

@@ -15,90 +15,115 @@
  * limitations under the License.
  */
 
-#if defined(_MSC_VER)
-	#pragma warning ( disable: 4231 4251 4275 4786 )
-#endif
-
-#include <log4cxx/logstring.h>
-#include <log4cxx/spi/loggerfactory.h>
 #include <log4cxx/hierarchy.h>
-#include <log4cxx/defaultloggerfactory.h>
-#include <log4cxx/logger.h>
-#include <log4cxx/spi/hierarchyeventlistener.h>
-#include <log4cxx/level.h>
-#include <algorithm>
 #include <log4cxx/helpers/loglog.h>
 #include <log4cxx/appender.h>
-#include <log4cxx/logstring.h>
 #include <log4cxx/helpers/stringhelper.h>
-#if !defined(LOG4CXX)
-	#define LOG4CXX 1
-#endif
-#include <log4cxx/helpers/aprinitializer.h>
-#include <log4cxx/defaultconfigurator.h>
 #include <log4cxx/spi/rootlogger.h>
+#include <algorithm>
+#include <map>
 #include <mutex>
-#include "assert.h"
+#include <vector>
 
 
-using namespace log4cxx;
-using namespace log4cxx::spi;
-using namespace log4cxx::helpers;
+using namespace LOG4CXX_NS;
+using namespace LOG4CXX_NS::spi;
+using namespace LOG4CXX_NS::helpers;
+
+
+typedef std::map<LogString, LoggerPtr> LoggerMap;
+typedef std::map<LogString, ProvisionNode> ProvisionNodeMap;
+
+struct Hierarchy::HierarchyPrivate
+{
+	HierarchyPrivate()
+		: configured(false)
+		, emittedNoAppenderWarning(false)
+		, emittedNoResourceBundleWarning(false)
+		, thresholdInt(Level::ALL_INT)
+	{
+	}
+
+	mutable std::recursive_mutex mutex;
+	mutable std::recursive_mutex configuredMutex;
+	bool configured;
+	bool emittedNoAppenderWarning;
+	bool emittedNoResourceBundleWarning;
+	int thresholdInt;
+
+	spi::HierarchyEventListenerList listeners;
+	LoggerPtr root;
+	LevelPtr threshold;
+	LoggerMap loggers;
+	ProvisionNodeMap provisionNodes;
+
+	mutable std::mutex listenerMutex;
+
+	const char* alreadyTriedMethod{ NULL };
+};
 
 IMPLEMENT_LOG4CXX_OBJECT(Hierarchy)
 
 Hierarchy::Hierarchy() :
-	pool(),
-	loggers(new LoggerMap()),
-	provisionNodes(new ProvisionNodeMap())
+	m_priv(std::make_unique<HierarchyPrivate>())
 {
-	std::unique_lock<std::mutex> lock(mutex);
-	root = LoggerPtr(new RootLogger(pool, Level::getDebug()));
-	defaultFactory = LoggerFactoryPtr(new DefaultLoggerFactory());
-	emittedNoAppenderWarning = false;
-	configured = false;
-	thresholdInt = Level::ALL_INT;
-	threshold = Level::getAll();
-	emittedNoResourceBundleWarning = false;
 }
 
 Hierarchy::~Hierarchy()
 {
-	// TODO LOGCXX-430
-	// https://issues.apache.org/jira/browse/LOGCXX-430?focusedCommentId=15175254&page=com.atlassian.jira.plugin.system.issuetabpanels:comment-tabpanel#comment-15175254
-#ifndef APR_HAS_THREADS
-	delete loggers;
-	delete provisionNodes;
-#endif
+	std::lock_guard<std::recursive_mutex> lock(m_priv->mutex);
+	for (auto& item : m_priv->loggers)
+	{
+		if (auto& pLogger = item.second)
+		{
+			pLogger->removeHierarchy();
+			pLogger->removeAllAppenders();
+		}
+	}
+	if (m_priv->root)
+	{
+		m_priv->root->removeHierarchy();
+		m_priv->root->removeAllAppenders();
+	}
 }
 
 void Hierarchy::addHierarchyEventListener(const spi::HierarchyEventListenerPtr& listener)
 {
-	std::unique_lock<std::mutex> lock(mutex);
+	std::lock_guard<std::mutex> lock(m_priv->listenerMutex);
 
-	if (std::find(listeners.begin(), listeners.end(), listener) != listeners.end())
+	if (std::find(m_priv->listeners.begin(), m_priv->listeners.end(), listener) != m_priv->listeners.end())
 	{
 		LogLog::warn(LOG4CXX_STR("Ignoring attempt to add an existent listener."));
 	}
 	else
 	{
-		listeners.push_back(listener);
+		m_priv->listeners.push_back(listener);
 	}
+}
+
+void Hierarchy::removeHierarchyEventListener(const spi::HierarchyEventListenerPtr& listener)
+{
+	std::lock_guard<std::mutex> lock(m_priv->listenerMutex);
+
+    auto found = std::find(m_priv->listeners.begin(), m_priv->listeners.end(), listener);
+    if(found != m_priv->listeners.end()){
+        m_priv->listeners.erase(found);
+    }
 }
 
 void Hierarchy::clear()
 {
-	std::unique_lock<std::mutex> lock(mutex);
-	loggers->clear();
+	std::lock_guard<std::recursive_mutex> lock(m_priv->mutex);
+	m_priv->loggers.clear();
 }
 
 void Hierarchy::emitNoAppenderWarning(const Logger* logger)
 {
 	bool emitWarning = false;
 	{
-		std::unique_lock<std::mutex> lock(mutex);
-		emitWarning = !emittedNoAppenderWarning;
-		emittedNoAppenderWarning = true;
+		std::lock_guard<std::recursive_mutex> lock(m_priv->mutex);
+		emitWarning = !m_priv->emittedNoAppenderWarning;
+		m_priv->emittedNoAppenderWarning = true;
 	}
 
 	// No appender in hierarchy, warn user only once.
@@ -113,12 +138,12 @@ void Hierarchy::emitNoAppenderWarning(const Logger* logger)
 
 LoggerPtr Hierarchy::exists(const LogString& name)
 {
-	std::unique_lock<std::mutex> lock(mutex);
+	std::lock_guard<std::recursive_mutex> lock(m_priv->mutex);
 
 	LoggerPtr logger;
-	LoggerMap::iterator it = loggers->find(name);
+	LoggerMap::iterator it = m_priv->loggers.find(name);
 
-	if (it != loggers->end())
+	if (it != m_priv->loggers.end())
 	{
 		logger = it->second;
 	}
@@ -131,7 +156,7 @@ void Hierarchy::setThreshold(const LevelPtr& l)
 {
 	if (l != 0)
 	{
-		std::unique_lock<std::mutex> lock(mutex);
+		std::lock_guard<std::recursive_mutex> lock(m_priv->mutex);
 		setThresholdInternal(l);
 	}
 }
@@ -153,12 +178,12 @@ void Hierarchy::setThreshold(const LogString& levelStr)
 
 void Hierarchy::setThresholdInternal(const LevelPtr& l)
 {
-	thresholdInt = l->toInt();
-	threshold = l;
+	m_priv->thresholdInt = l->toInt();
+	m_priv->threshold = l;
 
-	if (thresholdInt != Level::ALL_INT)
+	if (m_priv->thresholdInt != Level::ALL_INT)
 	{
-		configured = true;
+		m_priv->configured = true;
 	}
 }
 
@@ -167,18 +192,12 @@ void Hierarchy::fireAddAppenderEvent(const Logger* logger, const Appender* appen
 	setConfigured(true);
 	HierarchyEventListenerList clonedList;
 	{
-		std::unique_lock<std::mutex> lock(mutex);
-		clonedList = listeners;
+		std::lock_guard<std::mutex> lock(m_priv->listenerMutex);
+		clonedList = m_priv->listeners;
 	}
 
-	HierarchyEventListenerList::iterator it, itEnd = clonedList.end();
-	HierarchyEventListenerPtr listener;
-
-	for (it = clonedList.begin(); it != itEnd; it++)
-	{
-		listener = *it;
-		listener->addAppenderEvent(logger, appender);
-	}
+	for (auto& item : clonedList)
+		item->addAppenderEvent(logger, appender);
 }
 
 void Hierarchy::fireRemoveAppenderEvent(const Logger* logger, const Appender* appender)
@@ -186,157 +205,152 @@ void Hierarchy::fireRemoveAppenderEvent(const Logger* logger, const Appender* ap
 {
 	HierarchyEventListenerList clonedList;
 	{
-		std::unique_lock<std::mutex> lock(mutex);
-		clonedList = listeners;
+		std::lock_guard<std::mutex> lock(m_priv->listenerMutex);
+		clonedList = m_priv->listeners;
 	}
-	HierarchyEventListenerList::iterator it, itEnd = clonedList.end();
-	HierarchyEventListenerPtr listener;
-
-	for (it = clonedList.begin(); it != itEnd; it++)
-	{
-		listener = *it;
-		listener->removeAppenderEvent(logger, appender);
-	}
+	for (auto& item : clonedList)
+		item->removeAppenderEvent(logger, appender);
 }
 
-const LevelPtr& Hierarchy::getThreshold() const
+LevelPtr Hierarchy::getThreshold() const
 {
-	return threshold;
-}
-
-LoggerPtr Hierarchy::getLogger(const LogString& name)
-{
-	return getLogger(name, defaultFactory);
+	return m_priv->threshold ? m_priv->threshold : Level::getAll();
 }
 
 LoggerPtr Hierarchy::getLogger(const LogString& name,
 	const spi::LoggerFactoryPtr& factory)
 {
-	std::unique_lock<std::mutex> lock(mutex);
+	auto root = getRootLogger();
+	std::lock_guard<std::recursive_mutex> lock(m_priv->mutex);
 
-	LoggerMap::iterator it = loggers->find(name);
+	LoggerMap::iterator it = m_priv->loggers.find(name);
+	LoggerPtr result;
 
-	if (it != loggers->end())
+	if (it != m_priv->loggers.end())
 	{
-		return it->second;
+		result = it->second;
 	}
-	else
+	if (!result)
 	{
-		LoggerPtr logger(factory->makeNewLoggerInstance(pool, name));
-		logger->setHierarchy(shared_from_this());
-		loggers->insert(LoggerMap::value_type(name, logger));
+		LoggerPtr logger = factory
+			? factory->makeNewLoggerInstance(name)
+			: std::make_shared<Logger>(name);
+		logger->setHierarchy(this);
+		m_priv->loggers.insert(LoggerMap::value_type(name, logger));
 
-		ProvisionNodeMap::iterator it2 = provisionNodes->find(name);
+		ProvisionNodeMap::iterator it2 = m_priv->provisionNodes.find(name);
 
-		if (it2 != provisionNodes->end())
+		if (it2 != m_priv->provisionNodes.end())
 		{
-			updateChildren(it2->second, logger);
-			provisionNodes->erase(it2);
+			updateAncestory(it2->second, logger);
+			m_priv->provisionNodes.erase(it2);
 		}
 
-		updateParents(logger);
-		return logger;
+		updateParents(logger, root);
+		result = logger;
 	}
+	return result;
 
 }
 
 LoggerList Hierarchy::getCurrentLoggers() const
 {
-	std::unique_lock<std::mutex> lock(mutex);
+	std::lock_guard<std::recursive_mutex> lock(m_priv->mutex);
 
 	LoggerList v;
-	LoggerMap::const_iterator it, itEnd = loggers->end();
-
-	for (it = loggers->begin(); it != itEnd; it++)
+	for (auto& item : m_priv->loggers)
 	{
-		v.push_back(it->second);
+		if (auto pLogger = item.second)
+			v.push_back(pLogger);
 	}
-
-
 	return v;
 }
 
 LoggerPtr Hierarchy::getRootLogger() const
 {
-	return root;
+	std::lock_guard<std::recursive_mutex> lock(m_priv->mutex);
+	if (!m_priv->root)
+	{
+		m_priv->root = std::make_shared<RootLogger>(Level::getDebug());
+		m_priv->root->setHierarchy(const_cast<Hierarchy*>(this));
+	}
+
+	return m_priv->root;
 }
 
 bool Hierarchy::isDisabled(int level) const
 {
-	bool currentlyConfigured;
-	{
-		std::unique_lock<std::mutex> lock(mutex);
-		currentlyConfigured = configured;
-	}
-
-	if (!currentlyConfigured)
-	{
-		std::shared_ptr<Hierarchy> nonconstThis = std::const_pointer_cast<Hierarchy>(shared_from_this());
-		DefaultConfigurator::configure(
-			nonconstThis);
-	}
-
-	return thresholdInt > level;
+	return m_priv->thresholdInt > level;
 }
 
+void Hierarchy::ensureIsConfigured(std::function<void()> configurator)
+{
+	std::lock_guard<std::recursive_mutex> lock(m_priv->configuredMutex);
+	if (!m_priv->configured && m_priv->alreadyTriedMethod != configurator.target_type().name())
+	{
+		m_priv->alreadyTriedMethod = configurator.target_type().name();
+		configurator();
+	}
+}
 
 void Hierarchy::resetConfiguration()
 {
-	std::unique_lock<std::mutex> lock(mutex);
+	std::lock_guard<std::recursive_mutex> lock(m_priv->mutex);
 
-	getRootLogger()->setLevel(Level::getDebug());
-	root->setResourceBundle(0);
+	if (m_priv->root)
+	{
+		m_priv->root->setLevel(Level::getDebug());
+		m_priv->root->setResourceBundle(0);
+	}
 	setThresholdInternal(Level::getAll());
 
 	shutdownInternal();
 
-	LoggerMap::const_iterator it, itEnd = loggers->end();
-
-	for (it = loggers->begin(); it != itEnd; it++)
+	for (auto& item : m_priv->loggers)
 	{
-		it->second->setLevel(0);
-		it->second->setAdditivity(true);
-		it->second->setResourceBundle(0);
+		if (auto pLogger = item.second)
+		{
+			pLogger->setLevel(0);
+			pLogger->setAdditivity(true);
+			pLogger->setResourceBundle(0);
+		}
 	}
-
-	//rendererMap.clear();
 }
 
 void Hierarchy::shutdown()
 {
-	std::unique_lock<std::mutex> lock(mutex);
+	std::lock_guard<std::recursive_mutex> lock(m_priv->mutex);
 
 	shutdownInternal();
 }
 
 void Hierarchy::shutdownInternal()
 {
-	configured = false;
-
-	LoggerPtr root1 = getRootLogger();
+	m_priv->configured = false;
+	m_priv->alreadyTriedMethod = NULL;
 
 	// begin by closing nested appenders
-	root1->closeNestedAppenders();
+	if (m_priv->root)
+		m_priv->root->closeNestedAppenders();
 
-	LoggerMap::iterator it, itEnd = loggers->end();
-
-	for (it = loggers->begin(); it != itEnd; it++)
+	for (auto& item : m_priv->loggers)
 	{
-		LoggerPtr logger = it->second;
-		logger->closeNestedAppenders();
+		if (auto pLogger = item.second)
+			pLogger->closeNestedAppenders();
 	}
 
 	// then, remove all appenders
-	root1->removeAllAppenders();
+	if (m_priv->root)
+		m_priv->root->removeAllAppenders();
 
-	for (it = loggers->begin(); it != itEnd; it++)
+	for (auto& item : m_priv->loggers)
 	{
-		LoggerPtr logger = it->second;
-		logger->removeAllAppenders();
+		if (auto pLogger = item.second)
+			pLogger->removeAllAppenders();
 	}
 }
 
-void Hierarchy::updateParents(LoggerPtr logger)
+void Hierarchy::updateParents(const LoggerPtr& logger, const LoggerPtr& root)
 {
 	const LogString name(logger->getName());
 	size_t length = name.size();
@@ -350,26 +364,26 @@ void Hierarchy::updateParents(LoggerPtr logger)
 	{
 		LogString substr = name.substr(0, i);
 
-		LoggerMap::iterator it = loggers->find(substr);
+		LoggerMap::iterator it = m_priv->loggers.find(substr);
 
-		if (it != loggers->end())
+		if (it != m_priv->loggers.end())
 		{
 			parentFound = true;
-			logger->parent = it->second;
+			logger->setParent( it->second );
 			break; // no need to update the ancestors of the closest ancestor
 		}
 		else
 		{
-			ProvisionNodeMap::iterator it2 = provisionNodes->find(substr);
+			ProvisionNodeMap::iterator it2 = m_priv->provisionNodes.find(substr);
 
-			if (it2 != provisionNodes->end())
+			if (it2 != m_priv->provisionNodes.end())
 			{
 				it2->second.push_back(logger);
 			}
 			else
 			{
 				ProvisionNode node(1, logger);
-				provisionNodes->insert(
+				m_priv->provisionNodes.insert(
 					ProvisionNodeMap::value_type(substr, node));
 			}
 		}
@@ -378,51 +392,91 @@ void Hierarchy::updateParents(LoggerPtr logger)
 	// If we could not find any existing parents, then link with root.
 	if (!parentFound)
 	{
-		logger->parent = root;
+		logger->setParent( root );
 	}
 }
 
-void Hierarchy::updateChildren(ProvisionNode& pn, LoggerPtr logger)
+void Hierarchy::updateAncestory(ProvisionNode& pn, const LoggerPtr& logger)
 {
-
-	ProvisionNode::iterator it, itEnd = pn.end();
-
-	for (it = pn.begin(); it != itEnd; it++)
+	for (auto& l : pn)
 	{
-		LoggerPtr& l = *it;
-
 		// Unless this child already points to a correct (lower) parent,
-		// make cat.parent point to l.parent and l.parent to cat.
-		if (!StringHelper::startsWith(l->parent->name, logger->name))
+		// make logger.parent point to l.parent and l.parent to logger.
+		if (!StringHelper::startsWith(l->getParent()->getName(), logger->getName()))
 		{
-			logger->parent = l->parent;
-			l->parent = logger;
+			logger->setParent( l->getParent() );
+			l->setParent( logger );
+		}
+	}
+    
+}
+
+void Hierarchy::updateChildren(const Logger* parent)
+{
+	for (auto& item : m_priv->loggers)
+	{
+		for (auto l = item.second; l; l = l->getParent())
+		{
+			if (l->getParent().get() == parent)
+			{
+				item.second->updateCachedConfiguration();
+				break;
+			}
 		}
 	}
 }
 
 void Hierarchy::setConfigured(bool newValue)
 {
-	std::unique_lock<std::mutex> lock(mutex);
-	configured = newValue;
+	std::unique_lock<std::recursive_mutex> lock(m_priv->configuredMutex, std::try_to_lock);
+	if (lock.owns_lock()) // Not being auto-configured?
+		m_priv->configured = newValue;
 }
 
 bool Hierarchy::isConfigured()
 {
-	return configured;
+	std::lock_guard<std::recursive_mutex> lock(m_priv->configuredMutex); // Blocks while auto-configuration is active
+	return m_priv->configured;
 }
 
-HierarchyPtr Hierarchy::create(){
-	HierarchyPtr ret( new Hierarchy() );
-	ret->configureRoot();
+HierarchyPtr Hierarchy::create()
+{
+	HierarchyPtr ret(new Hierarchy);
 	return ret;
 }
 
-void Hierarchy::configureRoot(){
-	// This should really be done in the constructor, but in order to fix
-	// LOGCXX-322 we need to turn the repositroy into a weak_ptr, and we
-	// can't use weak_from_this() in the constructor.
-	if( !root->getLoggerRepository().lock() ){
-		root->setHierarchy(shared_from_this());
+
+bool Hierarchy::removeLogger(const LogString& name, bool ifNotUsed)
+{
+	auto parentRefCount = [this](const LoggerPtr& child) -> int
+	{
+		int result = 0;
+		for (auto& node : m_priv->provisionNodes)
+		{
+			if (node.second.end() != std::find(node.second.begin(), node.second.end(), child))
+				++result;
+		}
+		return result;
+	};
+	bool result = false;
+	std::lock_guard<std::recursive_mutex> lock(m_priv->mutex);
+	auto it = m_priv->loggers.find(name);
+	if (it == m_priv->loggers.end())
+		;
+	else if (ifNotUsed && 1 + parentRefCount(it->second) < it->second.use_count())
+		;
+	else
+	{
+		for (auto& node : m_priv->provisionNodes)
+		{
+			for (size_t i = node.second.size(); 0 < i; )
+			{
+				if (node.second[--i] == it->second)
+					node.second.erase(node.second.begin() + i);
+			}
+		}
+		m_priv->loggers.erase(it);
+		result = true;
 	}
+	return result;
 }

@@ -14,23 +14,29 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#if defined(_MSC_VER)
-	#pragma warning ( disable: 4231 4251 4275 4786 )
-#endif
 
 #include <log4cxx/logstring.h>
 #include <log4cxx/pattern/patternconverter.h>
+#include <log4cxx/helpers/pool.h>
 #include <log4cxx/helpers/transcoder.h>
+#include <log4cxx/private/patternconverter_priv.h>
 
-using namespace log4cxx;
-using namespace log4cxx::pattern;
+using namespace LOG4CXX_NS;
+using namespace LOG4CXX_NS::pattern;
 
 IMPLEMENT_LOG4CXX_OBJECT(PatternConverter)
 
 PatternConverter::PatternConverter(
-	const LogString& name1, const LogString& style1) :
-	name(name1), style(style1)
+	std::unique_ptr<PatternConverterPrivate> priv) :
+	m_priv(std::move(priv))
 {
+}
+
+PatternConverter::PatternConverter(const LogString& name,
+	const LogString& style) :
+	m_priv(std::make_unique<PatternConverterPrivate>(name, style))
+{
+
 }
 
 PatternConverter::~PatternConverter()
@@ -39,12 +45,12 @@ PatternConverter::~PatternConverter()
 
 LogString PatternConverter::getName() const
 {
-	return name;
+	return m_priv->name;
 }
 
-LogString PatternConverter::getStyleClass(const log4cxx::helpers::ObjectPtr& /* e */) const
+LogString PatternConverter::getStyleClass(const LOG4CXX_NS::helpers::ObjectPtr& /* e */) const
 {
-	return style;
+	return m_priv->style;
 }
 
 void PatternConverter::append(LogString& toAppendTo, const std::string& src)
@@ -53,3 +59,17 @@ void PatternConverter::append(LogString& toAppendTo, const std::string& src)
 	toAppendTo.append(decoded);
 }
 
+const FormattingInfo& PatternConverter::getFormattingInfo() const
+{
+	return *m_priv->info;
+}
+
+void PatternConverter::setFormattingInfo(const FormattingInfoPtr& newValue)
+{
+	m_priv->info = newValue;
+}
+
+void PatternConverter::format(const helpers::ObjectPtr& obj, LogString& toAppendTo, helpers::Pool&) const
+{
+	format(obj, toAppendTo);
+}

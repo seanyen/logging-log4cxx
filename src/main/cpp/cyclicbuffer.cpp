@@ -18,13 +18,39 @@
 #include <log4cxx/helpers/cyclicbuffer.h>
 #include <log4cxx/spi/loggingevent.h>
 #include <log4cxx/helpers/exception.h>
-#include <log4cxx/helpers/pool.h>
 #include <log4cxx/helpers/stringhelper.h>
 
-using namespace log4cxx;
-using namespace log4cxx::helpers;
-using namespace log4cxx::spi;
+using namespace LOG4CXX_NS;
+using namespace LOG4CXX_NS::helpers;
+using namespace LOG4CXX_NS::spi;
 
+namespace
+{
+int validateMaxSize(int maxSize)
+{
+	if (maxSize < 1)
+	{
+		LogString msg(LOG4CXX_STR("The maxSize argument ("));
+		StringHelper::toString(maxSize, msg);
+		msg.append(LOG4CXX_STR(") is not a positive integer."));
+		throw IllegalArgumentException(msg);
+	}
+
+	return maxSize;
+}
+}
+
+struct CyclicBuffer::CyclicBufferPriv
+{
+	CyclicBufferPriv(int maxSize1) :
+		ea(maxSize1), first(0), last(0), numElems(0), maxSize(maxSize1) {}
+
+	LOG4CXX_NS::spi::LoggingEventList ea;
+	int first;
+	int last;
+	int numElems;
+	int maxSize;
+};
 
 /**
 Instantiate a new CyclicBuffer of at most <code>maxSize</code> events.
@@ -32,16 +58,8 @@ The <code>maxSize</code> argument must a positive integer.
 @param maxSize The maximum number of elements in the buffer.
 */
 CyclicBuffer::CyclicBuffer(int maxSize1)
-	: ea(maxSize1), first(0), last(0), numElems(0), maxSize(maxSize1)
+	: m_priv(std::make_unique<CyclicBufferPriv>(validateMaxSize(maxSize1)))
 {
-	if (maxSize1 < 1)
-	{
-		LogString msg(LOG4CXX_STR("The maxSize argument ("));
-		Pool p;
-		StringHelper::toString(maxSize1, p, msg);
-		msg.append(LOG4CXX_STR(") is not a positive integer."));
-		throw IllegalArgumentException(msg);
-	}
 }
 
 CyclicBuffer::~CyclicBuffer()
@@ -53,20 +71,25 @@ Add an <code>event</code> as the last event in the buffer.
 */
 void CyclicBuffer::add(const spi::LoggingEventPtr& event)
 {
-	ea[last] = event;
-
-	if (++last == maxSize)
+	if (m_priv->ea.empty())
 	{
-		last = 0;
+		return;
 	}
 
-	if (numElems < maxSize)
+	m_priv->ea[m_priv->last] = event;
+
+	if (++m_priv->last == m_priv->maxSize)
 	{
-		numElems++;
+		m_priv->last = 0;
 	}
-	else if (++first == maxSize)
+
+	if (m_priv->numElems < m_priv->maxSize)
 	{
-		first = 0;
+		m_priv->numElems++;
+	}
+	else if (++m_priv->first == m_priv->maxSize)
+	{
+		m_priv->first = 0;
 	}
 }
 
@@ -78,12 +101,12 @@ currently in the buffer, then <code>null</code> is returned.
 */
 spi::LoggingEventPtr CyclicBuffer::get(int i)
 {
-	if (i < 0 || i >= numElems)
+	if (i < 0 || i >= m_priv->numElems)
 	{
 		return 0;
 	}
 
-	return ea[(first + i) % maxSize];
+	return m_priv->ea[(m_priv->first + i) % m_priv->maxSize];
 }
 
 /**
@@ -94,15 +117,15 @@ spi::LoggingEventPtr CyclicBuffer::get()
 {
 	LoggingEventPtr r;
 
-	if (numElems > 0)
+	if (m_priv->numElems > 0)
 	{
-		numElems--;
-		r = ea[first];
-		ea[first] = 0;
+		m_priv->numElems--;
+		r = m_priv->ea[m_priv->first];
+		m_priv->ea[m_priv->first] = 0;
 
-		if (++first == maxSize)
+		if (++m_priv->first == m_priv->maxSize)
 		{
-			first = 0;
+			m_priv->first = 0;
 		}
 	}
 
@@ -118,44 +141,53 @@ void CyclicBuffer::resize(int newSize)
 	if (newSize < 0)
 	{
 		LogString msg(LOG4CXX_STR("Negative array size ["));
-		Pool p;
-		StringHelper::toString(newSize, p, msg);
+		StringHelper::toString(newSize, msg);
 		msg.append(LOG4CXX_STR("] not allowed."));
 		throw IllegalArgumentException(msg);
 	}
 
-	if (newSize == numElems)
+	if (newSize == m_priv->numElems)
 	{
 		return;    // nothing to do
 	}
 
 	LoggingEventList temp(newSize);
 
-	int loopLen = newSize < numElems ? newSize : numElems;
+	int loopLen = newSize < m_priv->numElems ? newSize : m_priv->numElems;
 	int i;
 
 	for (i = 0; i < loopLen; i++)
 	{
-		temp[i] = ea[first];
-		ea[first] = 0;
+		temp[i] = m_priv->ea[m_priv->first];
+		m_priv->ea[m_priv->first] = 0;
 
-		if (++first == numElems)
+		if (++m_priv->first == m_priv->maxSize)
 		{
-			first = 0;
+			m_priv->first = 0;
 		}
 	}
 
-	ea = temp;
-	first = 0;
-	numElems = loopLen;
-	maxSize = newSize;
+	m_priv->ea = temp;
+	m_priv->first = 0;
+	m_priv->numElems = loopLen;
+	m_priv->maxSize = newSize;
 
 	if (loopLen == newSize)
 	{
-		last = 0;
+		m_priv->last = 0;
 	}
 	else
 	{
-		last = loopLen;
+		m_priv->last = loopLen;
 	}
+}
+
+int CyclicBuffer::getMaxSize() const
+{
+	return m_priv->maxSize;
+}
+
+int CyclicBuffer::length() const
+{
+	return m_priv->numElems;
 }

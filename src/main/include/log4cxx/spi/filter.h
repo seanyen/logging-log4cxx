@@ -22,7 +22,7 @@
 #include <log4cxx/spi/optionhandler.h>
 #include <log4cxx/spi/loggingevent.h>
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 namespace spi
 {
@@ -62,18 +62,18 @@ event is logged without consulting the remaining filters.
 <p>The philosophy of log4cxx filters is largely inspired from the
 Linux ipchains.
 
-<p>Note that filtering is only supported by the {@link
-xml::DOMConfigurator DOMConfigurator}.
+<p>Note that filtering is only supported by the DOMConfigurator.
 */
-class LOG4CXX_EXPORT Filter : public virtual OptionHandler,
-	public virtual helpers::Object
+class LOG4CXX_EXPORT Filter
+	: public OptionHandler
 {
-		/**
-		Points to the next filter in the filter chain.
-		*/
-		FilterPtr next;
+	protected:
+		LOG4CXX_DECLARE_PRIVATE_MEMBER_PTR(FilterPrivate, m_priv)
+
 	public:
 		Filter();
+		Filter(std::unique_ptr<FilterPrivate> priv);
+		virtual ~Filter();
 
 		DECLARE_ABSTRACT_LOG4CXX_OBJECT(Filter)
 		BEGIN_LOG4CXX_CAST_MAP()
@@ -81,8 +81,8 @@ class LOG4CXX_EXPORT Filter : public virtual OptionHandler,
 		LOG4CXX_CAST_ENTRY(spi::OptionHandler)
 		END_LOG4CXX_CAST_MAP()
 
-		log4cxx::spi::FilterPtr getNext() const;
-		void setNext(const log4cxx::spi::FilterPtr& newNext);
+		LOG4CXX_NS::spi::FilterPtr getNext() const;
+		void setNext(const LOG4CXX_NS::spi::FilterPtr& newNext);
 
 		enum FilterDecision
 		{
@@ -103,14 +103,22 @@ class LOG4CXX_EXPORT Filter : public virtual OptionHandler,
 
 		};
 
+		using OptionHandler::activateOptions;
+		/**
+		\copybrief spi::OptionHandler::activateOptions()
+
+		No action is performed in this implementation.
+		*/
+		void activateOptions(  ) override;
 
 		/**
-		Usually filters options become active when set. We provide a
+		\copybrief spi::OptionHandler::setOption()
 
-		default do-nothing implementation for convenience.
-		*/
-		void activateOptions(log4cxx::helpers::Pool& p);
-		void setOption(const LogString& option, const LogString& value);
+		Supported options | Supported values | Default value |
+		-------------- | ---------------- | --------------- |
+		- | - | - |
+		 */
+		void setOption(const LogString& option, const LogString& value) override;
 
 		/**
 		<p>If the decision is <code>DENY</code>, then the event will be

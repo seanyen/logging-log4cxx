@@ -19,14 +19,11 @@
 #define _LOG4CXX_DEFAULT_CONFIGURATOR_H
 
 #include <log4cxx/spi/configurator.h>
+#include <log4cxx/spi/loggerrepository.h>
+#include <tuple>
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
-namespace spi
-{
-class LoggerRepository;
-typedef std::shared_ptr<LoggerRepository> LoggerRepositoryPtr;
-}
 
 /**
  *   Configures the repository from environmental settings and files.
@@ -39,18 +36,117 @@ class LOG4CXX_EXPORT DefaultConfigurator
 
 	public:
 		/**
-		Add a ConsoleAppender that uses PatternLayout
-		using the PatternLayout#TTCC_CONVERSION_PATTERN and
-		prints to <code>stdout</code> to the root logger.*/
-		static void configure(log4cxx::spi::LoggerRepositoryPtr repository);
+		Configure \c repository.
 
-	private:
-		static const LogString getConfigurationFileName();
-		static const LogString getConfiguratorClass();
+		If the configuration file name has not been provided by a call to setConfigurationFileName(),
+		the environment variable "LOG4CXX_CONFIGURATION" value is used,
+		with ${varname} instances using either a system environment variable value (if found)
+		otherwise using the helpers::Properties object
+		provided by spi::Configurator::properties.
 
+		\usage
+		~~~
+		setenv LOG4CXX_CONFIGURATION="${PROGRAM_FILE_PATH.PARENT_PATH}/${PROGRAM_FILE_PATH.STEM}.xml"
+		~~~
 
+		If the configuration file name is not specified,
+		the current directory is examined for a file with extension ".xml" or ".properties"
+		with a base name "log4cxx" or "log4j".
 
-}; // class DefaultConfigurator
+		Unless a configurator is specified using the
+		"LOG4CXX_CONFIGURATOR_CLASS" environment variable,
+		or by a call to setConfiguratorClass(),
+		Log4cxx will call the spi::Configurator::isValid method
+		on an instance of each class registered with Log4cxx
+		whose name ends with "Configurator".
+		The first configurator instance whose spi::Configurator::isValid method
+		returns <code>true</code> is used to process the configuration file.
+
+		If a positive number has been provided by a call to setConfigurationWatchSeconds()
+		or the environment variables "LOG4CXX_CONFIGURATION_WATCH_SECONDS" contains a positive number
+		a background task is started that will periodically check for a change to the configuration file
+		and apply any configuration changes found.
+		*/
+		static spi::ConfigurationStatus configure(const spi::LoggerRepositoryPtr& repository = {});
+
+		/**
+		Instantiate an instance of \c className to process the configuration file used by configure().
+
+		@returns The previous value of LOG4CXX_CONFIGURATOR_CLASS in spi::Configurator::properties or environment variable
+		*/
+		static LogString setConfiguratorClass(const LogString& className);
+
+		/**
+		Make \c path the configuration file used by configure().
+
+		Any ${varname} instances in the \c path value are expanded
+		using either a system environment variable value (if found)
+		otherwise using the map provided by spi::Configurator::properties.
+
+		\usage
+		~~~{.cpp}
+		DefaultConfigurator::setConfigurationFileName(LOG4CXX_STR("${PROGRAM_FILE_PATH.PARENT_PATH}/${PROGRAM_FILE_PATH.STEM}.xml"))
+		~~~
+		@returns The previous value of LOG4CXX_CONFIGURATION in spi::Configurator::properties or environment variable
+		*/
+		static LogString setConfigurationFileName(const LogString& path);
+
+		/**
+		Make \c seconds the time a background task will delay before checking
+		for a change to the configuration file used by configure().
+
+		\usage
+		~~~{.cpp}
+		DefaultConfigurator::setConfigurationWatchSeconds(1);
+		~~~
+		@returns The previous value of LOG4CXX_CONFIGURATION_WATCH_SECONDS in spi::Configurator::properties or environment variable
+		*/
+		static int setConfigurationWatchSeconds(int seconds);
+
+		/**
+		 * Call configure() passing the default repository
+		 * after calling setConfigurationFileName() with a path composed of
+		 * an entry in \c directories and an entry in \c filenames
+		 * when the combination identifies an existing file.
+		 *
+		 \usage
+		 ~~~{.cpp}
+		 std::vector<LogString> directories
+		     { LOG4CXX_STR(".")
+		     , LOG4CXX_STR("${PROGRAM_FILE_PATH.PARENT_PATH}")
+		     };
+		 std::vector<LogString> filenames
+		     { LOG4CXX_STR("${PROGRAM_FILE_PATH.STEM}.xml")
+		     , LOG4CXX_STR("${PROGRAM_FILE_PATH.STEM}.properties")
+		     , LOG4CXX_STR("log4cxx.xml")
+		     };
+		 DefaultConfigurator::configureFromFile(directories, filenames);
+		 ~~~
+		 *
+		 * Using the above example and an executable file named "myapp"
+		 * installed in the  directory "/opt/com.foo/bin",
+		 * locations are checked in the following order:
+		 * -# "./myapp.xml"
+		 * -# "./myapp.properties"
+		 * -# "./log4cxx.xml"
+		 * -# "/opt/com.foo/bin/myapp.xml"
+		 * -# "/opt/com.foo/bin/myapp.properties"
+		 * -# "/opt/com.foo/bin/log4cxx.xml"
+		 *
+		 * If a file exists but it is not able to be used to configure Log4cxx,
+		 * the next file in the combinatorial set will be tried until
+		 * a valid configuration file is found or
+		 * all values in the combinatorial set have been tried.
+		 *
+		 * @param directories The directories to look in.
+		 * @param filenames The names of the files to look for
+		 * @return a success indicator and the configuration file path that was used (if found).
+		 */
+		static std::tuple<spi::ConfigurationStatus,LogString> configureFromFile
+			( const std::vector<LogString>& directories
+			, const std::vector<LogString>& filenames
+			);
+};	 // class DefaultConfigurator
 }  // namespace log4cxx
 
 #endif //_LOG4CXX_DEFAULT_CONFIGURATOR_H

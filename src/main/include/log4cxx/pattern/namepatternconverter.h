@@ -23,7 +23,7 @@
 
 #include <vector>
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 namespace pattern
 {
@@ -35,10 +35,7 @@ namespace pattern
  */
 class LOG4CXX_EXPORT NamePatternConverter : public LoggingEventPatternConverter
 {
-		/**
-		 * Abbreviator.
-		 */
-		const NameAbbreviatorPtr abbreviator;
+		struct NamePatternConverterPrivate;
 
 	public:
 		DECLARE_LOG4CXX_PATTERN(NamePatternConverter)
@@ -61,11 +58,12 @@ class LOG4CXX_EXPORT NamePatternConverter : public LoggingEventPatternConverter
 			const std::vector<LogString>& options);
 
 		/**
-		 * Abbreviate name in string buffer.
-		 * @param nameStart starting position of name to abbreviate.
+		 * Modify \c buf by abbreviating the name at index \c nameStart.
+		 * @pre !buf.empty() && nameStart < buf.length()
+		 * @param nameStart an index into \c buf of the name.
 		 * @param buf string buffer containing name.
 		 */
-		void abbreviate(int nameStart, LogString& buf) const;
+		void abbreviate(LogString::size_type nameStart, LogString& buf) const;
 
 	private:
 		NameAbbreviatorPtr getAbbreviator(const std::vector<LogString>& options);

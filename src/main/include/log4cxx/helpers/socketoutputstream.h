@@ -18,17 +18,11 @@
 #ifndef _LOG4CXX_HELPERS_SOCKET_OUTPUT_STREAM_H
 #define _LOG4CXX_HELPERS_SOCKET_OUTPUT_STREAM_H
 
-#if defined(_MSC_VER)
-	#pragma warning ( push )
-	#pragma warning ( disable: 4231 4251 4275 4786 )
-#endif
-
-
 #include <log4cxx/logstring.h>
 #include <log4cxx/helpers/outputstream.h>
 #include <log4cxx/helpers/socket.h>
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 namespace helpers
 {
@@ -46,13 +40,15 @@ class LOG4CXX_EXPORT SocketOutputStream : public OutputStream
 		SocketOutputStream(const SocketPtr& socket);
 		~SocketOutputStream();
 
-		virtual void close(Pool& p);
-		virtual void flush(Pool& p);
-		virtual void write(ByteBuffer& buf, Pool& p);
+		using OutputStream::close;
+		void close(  ) override;
+		using OutputStream::flush;
+		void flush(  ) override;
+		using OutputStream::write;
+		void write( ByteBuffer& buf ) override;
 
 	private:
-		ByteList array;
-		SocketPtr socket;
+		LOG4CXX_DECLARE_PRIVATE_MEMBER_PTR(SocketOutputStreamPrivate, m_priv)
 		//
 		//   prevent copy and assignment statements
 		SocketOutputStream(const SocketOutputStream&);
@@ -64,11 +60,6 @@ LOG4CXX_PTR_DEF(SocketOutputStream);
 
 }  // namespace helpers
 } // namespace log4cxx
-
-#if defined(_MSC_VER)
-	#pragma warning ( pop )
-#endif
-
 
 
 #endif // _LOG4CXX_HELPERS_SOCKET_OUTPUT_STREAM_H

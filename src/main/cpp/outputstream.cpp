@@ -17,10 +17,11 @@
 
 #include <log4cxx/logstring.h>
 #include <log4cxx/helpers/outputstream.h>
+#include <log4cxx/helpers/pool.h>
 #include <stdexcept>
 
-using namespace log4cxx;
-using namespace log4cxx::helpers;
+using namespace LOG4CXX_NS;
+using namespace LOG4CXX_NS::helpers;
 
 IMPLEMENT_LOG4CXX_OBJECT(OutputStream)
 
@@ -32,14 +33,6 @@ OutputStream::~OutputStream()
 {
 }
 
-#ifdef LOG4CXX_MULTI_PROCESS
-apr_file_t* OutputStream::getFilePtr()
-{
-	throw std::logic_error("getFilePtr must be implemented in the derived class that you are using");
-}
-
-OutputStream& OutputStream::getFileOutPutStreamPtr()
-{
-	throw std::logic_error("getFileOutPutStreamPtr must be implemented in the derived class that you are using");
-}
-#endif
+void OutputStream::close(Pool&) { close(); }
+void OutputStream::flush(Pool&) { flush(); }
+void OutputStream::write(ByteBuffer& buf, Pool&) { write(buf); }

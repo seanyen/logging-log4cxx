@@ -20,9 +20,12 @@
 #include <log4cxx/jsonlayout.h>
 #include <log4cxx/ndc.h>
 #include <log4cxx/mdc.h>
+#include <log4cxx/private/layout_priv.h>
 
 #include <iostream>
+#include <limits>
 #include <log4cxx/helpers/stringhelper.h>
+#include <log4cxx/helpers/transcoder.h>
 
 
 using namespace log4cxx;
@@ -35,6 +38,10 @@ using namespace log4cxx::spi;
 #else
 	#error __LOG4CXX_FUNC__ expected to be defined
 #endif
+
+static LogString ppIndentL1(LOG4CXX_STR("  "));
+static LogString ppIndentL2(LOG4CXX_STR("    "));
+
 /**
  * Test for JSONLayout.
  *
@@ -46,6 +53,9 @@ LOGUNIT_CLASS(JSONLayoutTest), public JSONLayout
 	LOGUNIT_TEST(testIgnoresThrowable);
 	LOGUNIT_TEST(testAppendQuotedEscapedStringWithPrintableChars);
 	LOGUNIT_TEST(testAppendQuotedEscapedStringWithControlChars);
+#if LOG4CXX_LOGCHAR_IS_UTF8
+	LOGUNIT_TEST(testAppendQuotedEscapedStringWithInvalidByte);
+#endif
 	LOGUNIT_TEST(testAppendSerializedMDC);
 	LOGUNIT_TEST(testAppendSerializedMDCWithPrettyPrint);
 	LOGUNIT_TEST(testAppendSerializedNDC);
@@ -55,6 +65,10 @@ LOGUNIT_CLASS(JSONLayoutTest), public JSONLayout
 	LOGUNIT_TEST(testFormat);
 	LOGUNIT_TEST(testFormatWithPrettyPrint);
 	LOGUNIT_TEST(testGetSetLocationInfo);
+	LOGUNIT_TEST(testAppendQuotedEscapedString);
+	LOGUNIT_TEST(testLayoutSizeOverflowGuards);
+	LOGUNIT_TEST(testLayoutSizeEdgeCases);
+	LOGUNIT_TEST(testReserveFormattedEventSizing);
 	LOGUNIT_TEST_SUITE_END();
 
 
@@ -159,7 +173,37 @@ public:
 
 		appendQuotedEscapedString(cr_escaped, cr);
 		LOGUNIT_ASSERT_EQUAL(cr_expected, cr_escaped);
+
+		logchar sub[] = {0x1a, 0x00};
+		logchar sub_expected[] = {0x22, 0x5c, 'u', 0x30, 0x30, 0x31, 0x61, 0x22, 0x00};      /* SUB */
+		LogString sub_escaped;
+
+		appendQuotedEscapedString(sub_escaped, sub);
+		LOGUNIT_ASSERT_EQUAL(sub_expected, sub_escaped);
+
+		logchar esc[] = {0x1e, 0x00};
+		logchar esc_expected[] = {0x22, 0x5c, 'u', 0x30, 0x30, 0x31, 0x65, 0x22, 0x00};      /* ESC */
+		LogString esc_escaped;
+
+		appendQuotedEscapedString(esc_escaped, esc);
+		LOGUNIT_ASSERT_EQUAL(esc_expected, esc_escaped);
 	}
+
+#if LOG4CXX_LOGCHAR_IS_UTF8
+	/**
+	 * An undecodable byte must be replaced and the text following it kept,
+	 * not dropped along with the rest of the input.
+	 */
+	void testAppendQuotedEscapedStringWithInvalidByte()
+	{
+		logchar in[] = {'A', (logchar) 0xFF, 'B', 0};
+		LogString expected(LOG4CXX_STR("\"A\\ufffdB\""));
+		LogString actual;
+
+		appendQuotedEscapedString(actual, in);
+		LOGUNIT_ASSERT_EQUAL(expected, actual);
+	}
+#endif
 
 	/**
 	 * Tests appendSerializedMDC.
@@ -280,12 +324,10 @@ public:
 	 */
 	void testAppendSerializedLocationInfo()
 	{
-		Pool p;
-
 		LoggingEventPtr event1 = LoggingEventPtr(new LoggingEvent(LOG4CXX_STR("Logger"),
 					Level::getInfo(),
 					LOG4CXX_STR("A message goes here."),
-					spi::LocationInfo("FooFile", "BarFunc", 42)));
+					spi::LocationInfo("FooFile", "FooFile", "BarFunc", 42)));
 
 		LogString output1;
 		LogString expected1;
@@ -297,7 +339,7 @@ public:
 		.append(LOG4CXX_STR("\"class\": \"\", "))
 		.append(LOG4CXX_STR("\"method\": \"BarFunc\" }"));
 
-		appendSerializedLocationInfo(output1, event1, p);
+		appendSerializedLocationInfo(output1, event1);
 		LOGUNIT_ASSERT_EQUAL(expected1, output1);
 	}
 
@@ -306,12 +348,10 @@ public:
 	 */
 	void testAppendSerializedLocationInfoWithPrettyPrint()
 	{
-		Pool p;
-
 		LoggingEventPtr event1 = LoggingEventPtr(new LoggingEvent(LOG4CXX_STR("Logger"),
 					Level::getInfo(),
 					LOG4CXX_STR("A message goes here."),
-					spi::LocationInfo("FooFile", "BarFunc", 42)));
+					spi::LocationInfo("FooFile", "FooFile", "BarFunc", 42)));
 
 		LogString output1;
 		LogString expected1;
@@ -336,7 +376,7 @@ public:
 		.append(LOG4CXX_STR("}"));
 
 		setPrettyPrint(true);
-		appendSerializedLocationInfo(output1, event1, p);
+		appendSerializedLocationInfo(output1, event1);
 
 		LOGUNIT_ASSERT_EQUAL(expected1, output1);
 	}
@@ -346,16 +386,14 @@ public:
 	 */
 	void testFormat()
 	{
-		Pool p;
-
 		LoggingEventPtr event1 = LoggingEventPtr(new LoggingEvent(LOG4CXX_STR("Logger"),
 					Level::getInfo(),
 					LOG4CXX_STR("A message goes here."),
-					spi::LocationInfo("FooFile", "BarFunc", 42)));
+					spi::LocationInfo("FooFile", "FooFile", "BarFunc", 42)));
 
 		LogString timestamp;
 		helpers::ISO8601DateFormat dateFormat;
-		dateFormat.format(timestamp, event1->getTimeStamp(), p);
+		dateFormat.format(timestamp, event1->getTimeStamp());
 
 		NDC::push("one");
 		NDC::push("two");
@@ -380,11 +418,11 @@ public:
 		appendSerializedMDC(expected1, event1);
 		appendSerializedNDC(expected1, event1);
 		expected1.append(LOG4CXX_STR(", "));
-		appendSerializedLocationInfo(expected1, event1, p);
+		appendSerializedLocationInfo(expected1, event1);
 
 		expected1.append(LOG4CXX_STR(" }"));
 		expected1.append(LOG4CXX_EOL);
-		format(output1, event1, p);
+		format(output1, event1);
 
 		LOGUNIT_ASSERT_EQUAL(expected1, output1);
 	}
@@ -394,16 +432,14 @@ public:
 	 */
 	void testFormatWithPrettyPrint()
 	{
-		Pool p;
-
 		LoggingEventPtr event1 = LoggingEventPtr(new LoggingEvent(LOG4CXX_STR("Logger"),
 					Level::getInfo(),
 					LOG4CXX_STR("A message goes here."),
-					spi::LocationInfo("FooFile", "BarFunc", 42)));
+					spi::LocationInfo("FooFile", "FooFile", "BarFunc", 42)));
 
 		LogString timestamp;
 		helpers::ISO8601DateFormat dateFormat;
-		dateFormat.format(timestamp, event1->getTimeStamp(), p);
+		dateFormat.format(timestamp, event1->getTimeStamp());
 
 		NDC::push("one");
 		NDC::push("two");
@@ -439,12 +475,12 @@ public:
 		appendSerializedNDC(expected1, event1);
 		expected1.append(LOG4CXX_STR(","));
 		expected1.append(LOG4CXX_EOL);
-		appendSerializedLocationInfo(expected1, event1, p);
+		appendSerializedLocationInfo(expected1, event1);
 
 		expected1.append(LOG4CXX_EOL);
 		expected1.append(LOG4CXX_STR("}"));
 		expected1.append(LOG4CXX_EOL);
-		format(output1, event1, p);
+		format(output1, event1);
 
 		LOGUNIT_ASSERT_EQUAL(expected1, output1);
 	}
@@ -474,8 +510,84 @@ public:
 		layout.setPrettyPrint(false);
 		LOGUNIT_ASSERT_EQUAL(false, layout.getPrettyPrint());
 	}
+
+	/**
+	 * Tests Unicode characters.
+	 */
+	void testAppendQuotedEscapedString()
+	{
+		std::string problemMessage = "'\001\"Hello \"\004'";
+		LogString expectedQuotedEscapedMessage = LOG4CXX_STR("\"'\\u0001\\\"Hello \\\"\\u0004'\"");
+		LOG4CXX_DECODE_CHAR(problemMessageLS, problemMessage);
+		LogString quotedEscapedMessage;
+		appendQuotedEscapedString(quotedEscapedMessage, problemMessageLS);
+		LOGUNIT_ASSERT_EQUAL(expectedQuotedEscapedMessage, quotedEscapedMessage);
+
+		// '\"räksmörgås.josefsson.org\"'
+		std::string problemName = "'\"\162\303\244\153\163\155\303\266\162\147\303\245\163\056\152\157\163\145\146\163\163\157\156\056\157\162\147\"'";
+		LOG4CXX_DECODE_CHAR(problemNameLS, problemName);
+		LogString expectedQuotedEscapedName = LOG4CXX_STR("\"") + problemNameLS + LOG4CXX_STR("\"");
+		expectedQuotedEscapedName.insert(2, 1, 0x5c); // insert a backslash before the first double quote
+		expectedQuotedEscapedName.insert(expectedQuotedEscapedName.size() - 3, 1, 0x5c); // insert a backslash before the last double quote
+		LogString quotedEscapedName;
+		appendQuotedEscapedString(quotedEscapedName, problemNameLS);
+		LOGUNIT_ASSERT_EQUAL(expectedQuotedEscapedName, quotedEscapedName);
+
+		Transcoder::encode(0xD822, problemNameLS); // Add a character that cannot be converted to UTF16
+#if LOG4CXX_LOGCHAR_IS_WCHAR && !defined(__STDC_ISO_10646__)
+		// encodeUTF16 adds 0xD822, but decodeUTF16 cannot convert 0xD822
+		expectedQuotedEscapedName.insert(expectedQuotedEscapedName.size() - 1, LOG4CXX_STR("\\ufffd")); // The Unicode replacement character
+#else
+		expectedQuotedEscapedName.insert(expectedQuotedEscapedName.size() - 1, LOG4CXX_STR("\\ufffd")); // The Unicode replacement character
+#endif
+		LogString escapedQuoted0xD822Name;
+		appendQuotedEscapedString(escapedQuoted0xD822Name, problemNameLS);
+		LOGUNIT_ASSERT_EQUAL(expectedQuotedEscapedName, escapedQuoted0xD822Name);
+	}
+
+	void testLayoutSizeOverflowGuards()
+	{
+		const size_t maxSize = (std::numeric_limits<size_t>::max)();
+		LOGUNIT_ASSERT_EQUAL(maxSize, priv::doubledLayoutSize(maxSize));
+		LOGUNIT_ASSERT_EQUAL(maxSize - 1, priv::doubledLayoutSize((maxSize - 1) / 2));
+
+		LogString output;
+		const size_t initialCapacity = output.capacity();
+		priv::reserveFormattedEvent(output, output.max_size(), 1);
+		LOGUNIT_ASSERT_EQUAL(initialCapacity, output.capacity());
+	}
+
+	void testLayoutSizeEdgeCases()
+	{
+		const size_t maxSize = (std::numeric_limits<size_t>::max)();
+		LOGUNIT_ASSERT_EQUAL(static_cast<size_t>(0), priv::doubledLayoutSize(0));
+		LOGUNIT_ASSERT_EQUAL(static_cast<size_t>(2), priv::doubledLayoutSize(1));
+		LOGUNIT_ASSERT_EQUAL(maxSize - 1, priv::doubledLayoutSize(maxSize / 2));
+		LOGUNIT_ASSERT_EQUAL(maxSize, priv::doubledLayoutSize((maxSize / 2) + 1));
+		LOGUNIT_ASSERT_EQUAL(maxSize, priv::doubledLayoutSize(maxSize));
+	}
+
+	void testReserveFormattedEventSizing()
+	{
+		LogString output;
+		const size_t initialCapacity = output.capacity();
+
+		priv::reserveFormattedEvent(output, 16, 8);
+		LOGUNIT_ASSERT(output.capacity() >= 24);
+		LOGUNIT_ASSERT(output.capacity() >= initialCapacity);
+
+		const size_t maxSize = output.max_size();
+		const size_t fixedSize = 16;
+		const size_t boundaryMessageSize = maxSize - fixedSize;
+		LOGUNIT_ASSERT_EQUAL(maxSize, fixedSize + boundaryMessageSize);
+		LOGUNIT_ASSERT(boundaryMessageSize <= maxSize);
+		LOGUNIT_ASSERT(fixedSize <= maxSize - boundaryMessageSize);
+
+		const size_t capacityBeforeSkip = output.capacity();
+		priv::reserveFormattedEvent(output, 16, (std::numeric_limits<size_t>::max)());
+		LOGUNIT_ASSERT_EQUAL(capacityBeforeSkip, output.capacity());
+	}
 };
 
 
 LOGUNIT_TEST_SUITE_REGISTRATION(JSONLayoutTest);
-

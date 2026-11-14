@@ -19,16 +19,14 @@
 #define _LOG4CXX_HELPERS_OUTPUTSTREAM_H
 
 #include <log4cxx/helpers/object.h>
-#ifdef LOG4CXX_MULTI_PROCESS
-	#include <apr_file_io.h>
-#endif
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 
 namespace helpers
 {
 class ByteBuffer;
+class Pool;
 
 /**
 *   Abstract class for writing to character streams.
@@ -46,13 +44,24 @@ class LOG4CXX_EXPORT OutputStream : public Object
 		virtual ~OutputStream();
 
 	public:
-		virtual void close(Pool& p) = 0;
-		virtual void flush(Pool& p) = 0;
-		virtual void write(ByteBuffer& buf, Pool& p) = 0;
-#ifdef LOG4CXX_MULTI_PROCESS
-		virtual apr_file_t* getFilePtr();
-		virtual OutputStream& getFileOutPutStreamPtr();
-#endif
+		virtual void close() = 0;
+		virtual void flush() = 0;
+		virtual void write(ByteBuffer& buf) = 0;
+		/**
+		@deprecated Backward compatability support will be removed in a future version.
+		*/
+		[[deprecated("Use close() without a Pool parameter instead")]]
+		void close(Pool& p);
+		/**
+		@deprecated Backward compatability support will be removed in a future version.
+		*/
+		[[deprecated("Use flush() without a Pool parameter instead")]]
+		void flush(Pool& p);
+		/**
+		@deprecated Backward compatability support will be removed in a future version.
+		*/
+		[[deprecated("Use write() without a Pool parameter instead")]]
+		void write(ByteBuffer& buf, Pool& p);
 
 	private:
 		OutputStream(const OutputStream&);

@@ -17,8 +17,16 @@
 
 #include <log4cxx/rolling/rollingpolicy.h>
 
-using namespace log4cxx::rolling;
-
+using namespace LOG4CXX_NS;
+using namespace LOG4CXX_NS::rolling;
 
 IMPLEMENT_LOG4CXX_OBJECT(RollingPolicy)
 
+RolloverDescriptionPtr RollingPolicy::initialize(const LogString& currentActiveFile, bool append, helpers::Pool&)
+{
+	return initialize(currentActiveFile, append);
+}
+RolloverDescriptionPtr RollingPolicy::rollover(const LogString& currentActiveFile, bool append, helpers::Pool&)
+{
+	return rollover(currentActiveFile, append);
+}

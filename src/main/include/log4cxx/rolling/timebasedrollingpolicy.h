@@ -19,19 +19,13 @@
 #if !defined(_LOG4CXX_ROLLING_TIME_BASED_ROLLING_POLICY_H)
 #define _LOG4CXX_ROLLING_TIME_BASED_ROLLING_POLICY_H
 
-#include <log4cxx/portability.h>
 #include <log4cxx/rolling/rollingpolicybase.h>
 #include <log4cxx/rolling/triggeringpolicy.h>
 #include <log4cxx/writerappender.h>
 #include <log4cxx/helpers/outputstream.h>
-#include <apr_mmap.h>
+#include <functional>
 
-#if defined(_MSC_VER)
-	#pragma warning ( push )
-	#pragma warning ( disable: 4251 )
-#endif
-
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 
 namespace rolling
@@ -46,8 +40,8 @@ namespace rolling
  * <p>In order to use  <code>TimeBasedRollingPolicy</code>, the
  * <b>FileNamePattern</b> option must be set. It basically specifies the name of the
  * rolled log files. The value <code>FileNamePattern</code> should consist of
- * the name of the file, plus a suitably placed <code>%d</code> conversion
- * specifier. The <code>%d</code> conversion specifier may contain a date and
+ * the name of the file, plus a suitably placed <code>\%d</code> conversion
+ * specifier. The <code>\%d</code> conversion specifier may contain a date and
  * time pattern as specified by the {@link log4cxx::helpers::SimpleDateFormat} class. If
  * the date and time pattern is ommitted, then the default pattern of
  * "yyyy-MM-dd" is assumed. The following examples should clarify the point.
@@ -60,9 +54,9 @@ namespace rolling
  *     <th>Example</th>
  *   </tr>
  *   <tr>
- *     <td nowrap="true"><code>/wombat/folder/foo.%d</code></td>
+ *     <td nowrap="true"><code>/wombat/folder/foo.\%d</code></td>
  *     <td>Daily rollover (at midnight).  Due to the omission of the optional
- *         time and date pattern for the %d token specifier, the default pattern
+ *         time and date pattern for the \%d token specifier, the default pattern
  *         of "yyyy-MM-dd" is assumed, which corresponds to daily rollover.
  *     </td>
  *     <td>During November 23rd, 2004, logging output will go to
@@ -72,7 +66,7 @@ namespace rolling
  *     </td>
  *   </tr>
  *   <tr>
- *     <td nowrap="true"><code>/wombat/foo.%d{yyyy-MM}.log</code></td>
+ *     <td nowrap="true"><code>/wombat/foo.\%d{yyyy-MM}.log</code></td>
  *     <td>Rollover at the beginning of each month.</td>
  *     <td>During the month of October 2004, logging output will go to
  *     <code>/wombat/foo.2004-10.log</code>. After midnight of October 31st
@@ -93,7 +87,7 @@ namespace rolling
  *     <th>Example</th>
  *   </tr>
  *   <tr>
- *     <td nowrap="true"><code>/wombat/foo.%d.gz</code></td>
+ *     <td nowrap="true"><code>/wombat/foo.\%d.gz</code></td>
  *     <td>Daily rollover (at midnight) with automatic GZIP compression of the
  *      arcived files.</td>
  *     <td>During November 23rd, 2004, logging output will go to
@@ -122,7 +116,7 @@ namespace rolling
  *     <th>Example</th>
  *   </tr>
  *   <tr>
- *     <td nowrap="true"><code>/wombat/foo.log.%d</code></td>
+ *     <td nowrap="true"><code>/wombat/foo.log.\%d</code></td>
  *     <td nowrap="true"><code>/wombat/foo.log</code></td>
  *     <td>Daily rollover.</td>
  *
@@ -143,8 +137,9 @@ namespace rolling
  * the {@link #activateOptions} method of the owning
  * <code>RollingFileAppender</code>.
  */
-class LOG4CXX_EXPORT TimeBasedRollingPolicy : public RollingPolicyBase,
-	public TriggeringPolicy
+class LOG4CXX_EXPORT TimeBasedRollingPolicy
+	: public RollingPolicyBase
+	, public virtual TriggeringPolicy
 {
 		DECLARE_LOG4CXX_OBJECT(TimeBasedRollingPolicy)
 		BEGIN_LOG4CXX_CAST_MAP()
@@ -154,119 +149,35 @@ class LOG4CXX_EXPORT TimeBasedRollingPolicy : public RollingPolicyBase,
 		END_LOG4CXX_CAST_MAP()
 
 	private:
-		/**
-		 * Time for next determination if time for rollover.
-		 */
-		log4cxx_time_t nextCheck;
-
-		/**
-		 * File name at last rollover.
-		 */
-		LogString lastFileName;
-
-		/**
-		 * mmap pointer
-		 */
-		apr_mmap_t* _mmap;
-
-		/*
-		 * pool for mmap handler
-		 * */
-		log4cxx::helpers::Pool* _mmapPool;
-
-		/**
-		 * mmap file descriptor
-		 */
-		apr_file_t* _file_map;
-
-		/**
-		 * mmap file name
-		 */
-		std::string _mapFileName;
-
-		/*
-		 * lock file handle
-		 * */
-		apr_file_t* _lock_file;
-
-		/**
-		 * Check nextCheck if it has already been set
-		 * Timebased rolling policy has an issue when working at low rps.
-		 * Under low rps, multiple processes will not be scheduled in time for the second chance(do rolling),
-		 * so the rolling mechanism will not be triggered even if the time period is out of date.
-		 * This results in log entries will be accumulated for serveral minutes to be rolling.
-		 * Adding this flag to provide rolling opportunity for a process even if it is writing the first log entry
-		 */
-		bool bAlreadyInitialized;
-
-		/*
-		 * If the current file name contains date information, retrieve the current writting file from mmap
-		 * */
-		bool bRefreshCurFile;
-
-		/*
-		 * mmap file name
-		 * */
-		LogString _fileNamePattern;
-
-		/**
-		 * Length of any file type suffix (.gz, .zip).
-		 */
-		int suffixLength;
+		LOG4CXX_DECLARE_PRIVATE_MEMBER_PTR(TimeBasedRollingPolicyPrivate, m_priv)
 
 	public:
 		TimeBasedRollingPolicy();
-		void activateOptions(log4cxx::helpers::Pool& );
-
-#ifdef LOG4CXX_MULTI_PROCESS
 		virtual ~TimeBasedRollingPolicy();
 
+		using RollingPolicyBase::activateOptions;
 		/**
-		 * Generate mmap file
-		 */
-		int createMMapFile(const std::string& lastfilename, log4cxx::helpers::Pool& pool);
+		\copybrief RollingPolicyBase::activateOptions()
 
-		/**
-		 *  Detect if the mmap file is empty
-		 */
-		bool isMapFileEmpty(log4cxx::helpers::Pool& pool);
+		Logs a warning if an option is not valid.
 
-		/**
-		 *   init MMapFile
-		 */
-		void initMMapFile(const LogString& lastFileName, log4cxx::helpers::Pool& pool);
+		\sa RollingPolicyBase::activateOptions()
+		*/
+		void activateOptions( ) override;
 
-		/**
-		 *   lock MMapFile
-		 */
-		int lockMMapFile(int type);
+		void setMultiprocess(bool multiprocess);
 
-		/**
-		 *   unlock MMapFile
-		 */
-		int unLockMMapFile();
-
-		/**
-		 *   create MMapFile/lockFile
-		 */
-		const std::string createFile(const std::string& filename, const std::string& suffix, log4cxx::helpers::Pool& pool);
-#endif
-
+		using RollingPolicy::initialize;
 		/**
 		 * {@inheritDoc}
 		 */
-		RolloverDescriptionPtr initialize(
-			const   LogString&              currentActiveFile,
-			const   bool                    append,
-			log4cxx::helpers::Pool& pool);
+		RolloverDescriptionPtr initialize( const LogString& currentActiveFile, bool append ) override;
 
+		using RollingPolicy::rollover;
 		/**
 		 * {@inheritDoc}
 		 */
-		RolloverDescriptionPtr rollover(
-			const   LogString&              currentActiveFile,
-			const   bool                    append,
-			log4cxx::helpers::Pool& pool);
+		RolloverDescriptionPtr rollover( const LogString& currentActiveFile, bool append ) override;
 
 		/**
 		 * Determines if a rollover may be appropriate at this time.  If
@@ -279,14 +190,40 @@ class LOG4CXX_EXPORT TimeBasedRollingPolicy : public RollingPolicyBase,
 		 * @param fileLength Length of the file in bytes.
 		 * @return true if a rollover should occur.
 		 */
-		virtual bool isTriggeringEvent(
+		bool isTriggeringEvent(
 			Appender* appender,
-			const log4cxx::spi::LoggingEventPtr& event,
+			const spi::LoggingEventPtr& event,
 			const LogString& filename,
-			size_t fileLength);
+			size_t fileLength) override;
+
+		/**
+		\copybrief RollingPolicyBase::setOption()
+
+		Supported options | Supported values | Default value
+		:-------------- | :----------------: | :---------------:
+		ThrowIOExceptionOnForkFailure | True,False | True
+
+		\sa RollingPolicyBase::setOption()
+		 */
+		void setOption(const LogString& option, const LogString& value) override;
+
+		/**
+		 * Was the name in shared memory set by this process?
+		 */
+		bool isLastFileNameUnchanged();
+
+		/**
+		 * Load the name (set by some other process) from shared memory
+		 */
+		void loadLastFileName();
 
 	protected:
-		log4cxx::pattern::PatternMap getFormatSpecifiers() const;
+		/**
+		 * A map from "d" and "date" to a date conversion formatter.
+		 *
+		 * \sa FileDatePatternConverter
+		 */
+		LOG4CXX_NS::pattern::PatternMap getFormatSpecifiers() const override;
 
 };
 
@@ -294,10 +231,6 @@ LOG4CXX_PTR_DEF(TimeBasedRollingPolicy);
 
 }
 }
-
-#if defined(_MSC_VER)
-	#pragma warning ( pop )
-#endif
 
 #endif
 

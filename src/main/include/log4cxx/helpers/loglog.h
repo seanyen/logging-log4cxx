@@ -19,95 +19,195 @@
 #define _LOG4CXX_HELPERS_LOG_LOG_H
 
 #include <log4cxx/logstring.h>
-#include <exception>
-#include <mutex>
+#include <log4cxx/logger.h>
+#include <log4cxx/helpers/singletonholder.h>
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 namespace helpers
 {
+
 /**
 This class used to output log statements from within the log4cxx package.
 
 <p>Log4cxx components cannot make log4cxx logging calls. However, it is
 sometimes useful for the user to learn about what log4cxx is
-doing. You can enable log4cxx internal logging by calling the
+doing. You can enable log4cxx internal debug logging by calling the
 <b>#setInternalDebugging</b> method.
 
-<p>All log4cxx internal debug calls go to standard output
-where as internal error messages are sent to
-standard error output. All internal messages are prepended with
-the string "log4cxx: ".
+<p>All LogLog messages are written to SystemErrWriter
+prepended with the string "log4cxx: ".
 */
 class LOG4CXX_EXPORT LogLog
 {
 	private:
-		bool debugEnabled;
+		LOG4CXX_DECLARE_PRIVATE_MEMBER_PTR(LogLogPrivate, m_priv)
 
-		/**
-		       In quietMode not even errors generate any output.
-		 */
-		bool quietMode;
-		std::mutex mutex;
+		friend class SingletonHolder<LogLog>;
 		LogLog();
 		LogLog(const LogLog&);
 		LogLog& operator=(const LogLog&);
-		static LogLog& getInstance();
-
 
 	public:
-		/**
-		Allows to enable/disable log4cxx internal logging.
-		*/
-		static void setInternalDebugging(bool enabled);
+		using LabelPtr = LoggerPtr;
+
+		~LogLog();
 
 		/**
-		This method is used to output log4cxx internal debug
-		statements. Output goes to the standard output.
+		 *  Are debug messages sent to SystemErrWriter?
+		 **/
+		static bool isDebugEnabled();
+
+		/**
+		 *  Are \c category debug messages sent to SystemErrWriter?
+		 **/
+		static bool isDebugEnabledFor(const LabelPtr& category);
+
+		/**
+		 *  Are \c category trace messages sent to SystemErrWriter?
+		 **/
+		static bool isTraceEnabledFor(const LabelPtr& category);
+
+		/**
+		Start/stop outputing debug messages if \c newValue is true/false respectively.
+		*/
+		static void setInternalDebugging(bool newValue);
+
+		/**
+		 *  Are messages output in color?
+		 **/
+		static bool isColorEnabled();
+
+		/**
+		Start/stop coloring message text if \c newValue is true/false respectively.
+		*/
+		static void setColorEnabled(bool newValue);
+
+		/**
+		Output \c msg to SystemErrWriter if internal debug logging is enabled.
 		*/
 		static void debug(const LogString& msg);
+		/**
+		Output \c msg and <code>ex.what()</code> to SystemErrWriter if internal debug logging is enabled.
+		*/
 		static void debug(const LogString& msg, const std::exception& e);
 
 
 		/**
-		This method is used to output log4cxx internal error
-		statements. There is no way to disable error statements.
-		Output goes to stderr.
+		Output \c msg to SystemErrWriter unconditionally.
 		*/
 		static void error(const LogString& msg);
-		static void error(const LogString& msg, const std::exception& e);
-
+		/**
+		Output \c msg and <code>ex.what()</code> to SystemErrWriter unconditionally.
+		*/
+		static void error(const LogString& msg, const std::exception& ex);
 
 		/**
+		Output \c msg to SystemErrWriter if internal debug logging is enabled.
+		*/
+		static void trace(const LabelPtr& category, const LogString& msg);
+
+#if !LOG4CXX_LOGCHAR_IS_UTF8
+		/**
+		Output \c msg to SystemErrWriter if internal debug logging is enabled.
+		*/
+		static void trace(const LabelPtr& category, const std::string& msg);
+#endif
+		/**
+		Change quiet mode to \c newValue.
+
 		In quiet mode LogLog generates strictly no output, not even
 		for errors.
 
-		@param quietMode <code>true</code> for no output.
+		@param newValue <code>true</code> for no output.
 		*/
-		static void setQuietMode(bool quietMode);
+		static void setQuietMode(bool newValue);
 
 		/**
-		This method is used to output log4cxx internal warning
-		statements. There is no way to disable warning statements.
-		Output goes to stderr.
+		Output \c msg to SystemErrWriter unconditionally.
 		*/
 		static void warn(const LogString&  msg);
-		static void warn(const LogString&  msg, const std::exception& e);
+		/**
+		Output \c msg and <code>ex.what()</code> to SystemErrWriter unconditionally.
+		*/
+		static void warn(const LogString&  msg, const std::exception& ex);
 
-	private:
-		static void emit(const LogString& msg);
-		static void emit(const std::exception& ex);
+		/**
+		A \c name category for internal logging.
+		*/
+		static LabelPtr getCategory(const LogString& name);
+
+		/**
+		Internal use only.
+		*/
+		static ObjectPtr _createInstance();
 };
 }  // namespace helpers
 } // namespace log4cxx
 
-#define LOGLOG_DEBUG(log) { \
-		log4cxx::helpers::LogLog::debug(log) ; }
+#if defined(LOGLOG_THRESHOLD) && LOGLOG_THRESHOLD <= 10000
+/**
+Send \c message to helpers::SystemErrWriter if \c category is enabled for <code>DEBUG</code> events.
 
-#define LOGLOG_WARN(log) { \
-		log4cxx::helpers::LogLog::warn(log) ; }
+\usage
+~~~{.cpp}
+LOGLOG_DEBUG(m_logLabel, "setRemote:"
+	<< " hostAddress " << address->getHostAddress()
+	<< " port " << port
+	<< " inetType " << m_inetType
+	<< " ipVersion " << m_inetFamily
+	);
+~~~
 
-#define LOGLOG_ERROR(log) { \
-		log4cxx::helpers::LogLog::warn(log); }
+@param category has a name and a level.
+@param message a valid parameter to an <code>operator<<(std::ostream&. ...)</code> overload.
+*/
+#define LOGLOG_DEBUG(category, message) { \
+		if (LOG4CXX_NS::helpers::LogLog::isDebugEnabledFor(category)) { \
+			LOG4CXX_NS::helpers::MessageBuffer buf; \
+			LOG4CXX_NS::helpers::LogLog::trace(category, buf.str(buf << message)); } }
+#else // !defined(LOGLOG_THRESHOLD) || 10000 < LOGLOG_THRESHOLD
+#define LOGLOG_DEBUG(category, message)
+#endif
+
+#if defined(LOGLOG_THRESHOLD) && LOGLOG_THRESHOLD <= 5000
+/**
+Send \c message to helpers::SystemErrWriter if \c category is enabled for <code>TRACE</code> events.
+
+\usage
+~~~{.cpp}
+LOGLOG_TRACE(m_logLabel, "write:"
+	<< " byteCount " << byteCount
+	<< " to " << *m_remoteAddress
+	<< "\n" << MessageData(pMessage, byteCount)
+	);
+~~~
+
+@param category has a name and a level.
+@param message a valid parameter to an <code>operator<<(std::ostream&. ...)</code> overload.
+*/
+#define LOGLOG_TRACE(category, message) { \
+		if (LOG4CXX_NS::helpers::LogLog::isTraceEnabledFor(category)) { \
+			LOG4CXX_NS::helpers::MessageBuffer buf; \
+			LOG4CXX_NS::helpers::LogLog::trace(category, buf.str(buf << message)); } }
+#else // !defined(LOGLOG_THRESHOLD) || 5000 < LOGLOG_THRESHOLD
+#define LOGLOG_TRACE(category, message)
+#endif
+
+/**
+Send \c message to helpers::SystemErrWriter using the configured warning output style.
+@param message a valid parameter to an <code>operator<<(std::ostream&. ...)</code> overload.
+*/
+#define LOGLOG_WARN(message) { \
+		LOG4CXX_NS::helpers::MessageBuffer buf; \
+		LOG4CXX_NS::helpers::LogLog::warn(buf.str(buf << message)); }
+
+/**
+Send \c message to helpers::SystemErrWriter using the configured error output style.
+@param message a valid parameter to an <code>operator<<(std::ostream&. ...)</code> overload.
+*/
+#define LOGLOG_ERROR(message) { \
+		LOG4CXX_NS::helpers::MessageBuffer buf; \
+		LOG4CXX_NS::helpers::LogLog::error(buf.str(buf << message)); }
 
 #endif //_LOG4CXX_HELPERS_LOG_LOG_H

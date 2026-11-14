@@ -15,17 +15,11 @@
  * limitations under the License.
  */
 
-#include <log4cxx/logstring.h>
 #include <log4cxx/helpers/systemoutwriter.h>
-#include <log4cxx/helpers/transcoder.h>
-#include <stdio.h>
-#if !defined(LOG4CXX)
-	#define LOG4CXX 1
-#endif
-#include <log4cxx/private/log4cxx_private.h>
+#include <log4cxx/private/consolewriter_priv.h>
 
-using namespace log4cxx;
-using namespace log4cxx::helpers;
+using namespace LOG4CXX_NS;
+using namespace LOG4CXX_NS::helpers;
 
 IMPLEMENT_LOG4CXX_OBJECT(SystemOutWriter)
 
@@ -37,48 +31,17 @@ SystemOutWriter::~SystemOutWriter()
 {
 }
 
-void SystemOutWriter::close(Pool& /* p */ )
+void SystemOutWriter::close(  )
 {
 }
 
-void SystemOutWriter::flush(Pool& /* p */ )
-{
-	flush();
-}
-
-void SystemOutWriter::write(const LogString& str, Pool& /* p */ )
-{
-	write(str);
-}
-
-bool SystemOutWriter::isWide()
-{
-#if LOG4CXX_FORCE_WIDE_CONSOLE
-	return true;
-#elif LOG4CXX_FORCE_BYTE_CONSOLE || !LOG4CXX_HAS_FWIDE
-	return false;
-#else
-	return fwide(stdout, 0) > 0;
-#endif
-}
-
-void SystemOutWriter::write(const LogString& str)
-{
-#if LOG4CXX_WCHAR_T_API
-
-	if (isWide())
-	{
-		LOG4CXX_ENCODE_WCHAR(msg, str);
-		fputws(msg.c_str(), stdout);
-		return;
-	}
-
-#endif
-	LOG4CXX_ENCODE_CHAR(msg, str);
-	fputs(msg.c_str(), stdout);
-}
-
-void SystemOutWriter::flush()
+void SystemOutWriter::flush(  )
 {
 	fflush(stdout);
 }
+
+void SystemOutWriter::write( const LogString& str )
+{
+	helpers::writeToConsole(str, stdout);
+}
+

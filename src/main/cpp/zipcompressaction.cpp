@@ -19,29 +19,54 @@
 #include <apr_thread_proc.h>
 #include <apr_strings.h>
 #include <log4cxx/helpers/exception.h>
+#include <log4cxx/helpers/pool.h>
 #include <log4cxx/helpers/transcoder.h>
+#include <log4cxx/private/action_priv.h>
+#include <log4cxx/helpers/loglog.h>
 
-using namespace log4cxx;
-using namespace log4cxx::rolling;
-using namespace log4cxx::helpers;
+using namespace LOG4CXX_NS;
+using namespace LOG4CXX_NS::rolling;
+using namespace LOG4CXX_NS::helpers;
+
+#define priv static_cast<ZipCompressActionPrivate*>(m_priv.get())
+
+struct ZipCompressAction::ZipCompressActionPrivate : public ActionPrivate
+{
+	ZipCompressActionPrivate
+		( const File& toRename
+		, const File& renameTo
+		, bool deleteSource
+		)
+		: ActionPrivate{ LOG4CXX_STR("zip") }
+		, source(toRename)
+		, destination(renameTo)
+		, deleteSource(deleteSource)
+		{}
+
+	const File source;
+	const File destination;
+	bool deleteSource;
+	bool throwIOExceptionOnForkFailure = true;
+};
 
 IMPLEMENT_LOG4CXX_OBJECT(ZipCompressAction)
 
 ZipCompressAction::ZipCompressAction(const File& src,
 	const File& dest,
 	bool del)
-	: source(src), destination(dest), deleteSource(del)
+	: Action(std::make_unique<ZipCompressActionPrivate>(
+			  src, dest, del))
 {
 }
 
-bool ZipCompressAction::execute(log4cxx::helpers::Pool& p) const
+bool ZipCompressAction::execute(  ) const
 {
-	if (!source.exists(p))
+	if (!priv->source.exists())
 	{
 		return false;
 	}
-
-	apr_pool_t* aprpool = p.getAPRPool();
+	helpers::Pool tempPool;
+	apr_pool_t* aprpool = tempPool.getAPRPool();
 	apr_procattr_t* attr;
 	apr_status_t stat = apr_procattr_create(&attr, aprpool);
 
@@ -80,19 +105,18 @@ bool ZipCompressAction::execute(log4cxx::helpers::Pool& p) const
 		}
 	}
 
-	const char** args = (const char**)
-		apr_palloc(aprpool, 5 * sizeof(*args));
+	const char* args[5];
 	int i = 0;
 
 	args[i++] = "zip";
 	args[i++] = "-q";
-	args[i++] = Transcoder::encode(destination.getPath(), p);
-	args[i++] = Transcoder::encode(source.getPath(), p);
+	args[i++] = priv->destination.getAPRPath();
+	args[i++] = priv->source.getAPRPath();
 	args[i++] = NULL;
 
-	if (destination.exists(p))
+	if (priv->destination.exists())
 	{
-		destination.deleteFile(p);
+		priv->destination.deleteFile();
 	}
 
 	apr_proc_t pid;
@@ -100,21 +124,37 @@ bool ZipCompressAction::execute(log4cxx::helpers::Pool& p) const
 
 	if (stat != APR_SUCCESS)
 	{
-		throw IOException(stat);
+		LogLog::warn(LOG4CXX_STR("Failed to fork zip during log rotation; leaving log file uncompressed"));
+		if (priv->throwIOExceptionOnForkFailure)
+			throw IOException(LOG4CXX_STR("zip"), stat);
+		/* If we fail here (to create the zip child process),
+		 * skip the compression and consider the rotation to be
+		 * otherwise successful. The caller has already rotated
+		 * the log file (`source` here refers to the
+		 * uncompressed, rotated path, and `destination` the
+		 * same path with `.zip` appended). Remove the empty
+		 * destination file and leave source as-is.
+		 */
+		return true;
 	}
 
 	int exitCode;
-	apr_proc_wait(&pid, &exitCode, NULL, APR_WAIT);
+	apr_exit_why_e reason;
+	apr_proc_wait(&pid, &exitCode, &reason, APR_WAIT);
 
-	if (exitCode != APR_SUCCESS)
+	if (exitCode != 0)
 	{
-		throw IOException(exitCode);
+		throw SubProcessFailure(LOG4CXX_STR("zip"), exitCode, reason);
 	}
 
-	if (deleteSource)
+	if (priv->deleteSource)
 	{
-		source.deleteFile(p);
+		priv->source.deleteFile();
 	}
 
 	return true;
+}
+
+void ZipCompressAction::setThrowIOExceptionOnForkFailure(bool throwIO){
+	priv->throwIOExceptionOnForkFailure = throwIO;
 }

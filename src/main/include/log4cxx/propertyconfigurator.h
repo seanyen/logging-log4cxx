@@ -18,12 +18,6 @@
 #ifndef _LOG4CXX_PROPERTY_CONFIGURATOR_H
 #define _LOG4CXX_PROPERTY_CONFIGURATOR_H
 
-#if defined(_MSC_VER)
-	#pragma warning (push)
-	#pragma warning ( disable: 4231 4251 4275 4786 )
-#endif
-
-
 #include <log4cxx/helpers/object.h>
 #include <log4cxx/logstring.h>
 #include <log4cxx/spi/configurator.h>
@@ -31,51 +25,208 @@
 
 #include <log4cxx/file.h>
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
-class Logger;
-typedef std::shared_ptr<Logger> LoggerPtr;
-
-class Appender;
-typedef std::shared_ptr<Appender> AppenderPtr;
-
 namespace helpers
 {
 class Properties;
 }
 
-
-namespace spi
-{
-class LoggerFactory;
-}
-
-class PropertyWatchdog;
 /**
-Allows the configuration of log4cxx from an external file.  See
-<b>{@link #doConfigure(const File&, log4cxx::spi::LoggerRepositoryPtr&)}</b>
-for the expected format.
+Allows Loggers, Appenders and Layouts to be set up using directives in a properties file.
 
-<p>It is sometimes useful to see how log4cxx is reading configuration
-files. You can enable log4cxx internal logging by defining the
-<b>log4j.debug</b> variable.
+\anchor PropertyConfigurator_details
+The configuration file consists of statements in the format
+<code>key=value</code>.
+A line beginning with a <code>#</code> or <code>!</code> character
+is ignored by %log4cxx (use for a comment).
+The syntax of different configuration
+elements are discussed below.
 
-<P>At class initialization time class,
-the file <b>log4j.properties</b> will be searched in the current directory.
-If the file can be found, then it will
-be fed to the
-{@link PropertyConfigurator#configure(const File& configFilename)}
-method.
+The <code>PropertyConfigurator</code> does not handle the
+advanced configuration features supported by the
+{@link xml::DOMConfigurator DOMConfigurator} such as
+custom {@link spi::ErrorHandler ErrorHandlers},
+filters attached to a {@link rolling::FilterBasedTriggeringPolicy FilterBasedTriggeringPolicy}, etc.
 
-<p>The <code>PropertyConfigurator</code> does not handle the
-advanced configuration features supported by the {@link
-xml::DOMConfigurator DOMConfigurator} such as
-support for {@link spi::Filter Filters}, custom
-{@link spi::ErrorHandler ErrorHandlers}, nested
-appenders such as the {@link AsyncAppender
-AsyncAppender}, etc.
+<h3>Configuring appenders</h3>
 
-<p>All option <em>values</em> admit variable substitution. The
+%Appender configuration syntax is:
+<pre>
+# For appender named <i>appenderName</i>, set its class.
+# Note: The appender name can contain dots.
+log4j.appender.appenderName=fully.qualified.name.of.appender.class
+
+# Set appender specific options.
+log4j.appender.appenderName.option1=value1
+...
+log4j.appender.appenderName.optionN=valueN
+</pre>
+
+For each named appender you can configure its {@link Layout Layout}. The
+syntax for configuring an appender's layout is:
+<pre>
+log4j.appender.appenderName.layout=fully.qualified.name.of.layout.class
+log4j.appender.appenderName.layout.option1=value1
+....
+log4j.appender.appenderName.layout.optionN=valueN
+</pre>
+
+For each named appender you can configure a chain of {@link spi::Filter Filters}.
+The syntax for configuring an appender's filters is:
+<pre>
+log4j.appender.appenderName.filter.ID=fully.qualified.name.of.filter.class
+log4j.appender.appenderName.filter.ID.option1=value1
+....
+log4j.appender.appenderName.filter.ID.optionN=valueN
+</pre>
+
+where <i>ID</i> is a name (without dots) that identifies the filter.
+The filters are added to the appender in ascending (string) order of <i>ID</i>,
+for example a filter with ID <code>2</code> is consulted before a filter with ID <code>3</code>,
+but after a filter with ID <code>10</code>.
+The option name is the remainder of the key after <i>ID</i> and may contain dots.
+
+For example, the following sends only the warning level logging requests to the appender "A1":
+<pre>
+log4j.appender.A1.filter.1=LevelMatchFilter
+log4j.appender.A1.filter.1.LevelToMatch=WARN
+log4j.appender.A1.filter.1.AcceptOnMatch=true
+log4j.appender.A1.filter.2=DenyAllFilter
+</pre>
+
+Refer to the Appender::setOption override of each implemented appender,
+Layout::setOption override of each implemented layout and
+spi::Filter::setOption override of each implemented filter
+for class specific options.
+
+<h3>Configuring loggers</h3>
+
+The syntax for configuring the root logger is:
+<pre>
+log4j.rootLogger=[level], appenderName, appenderName, ...
+</pre>
+
+This syntax means that an optional <em>level</em> can be
+supplied followed by appender names separated by commas.
+
+The level value can consist of the string values OFF, FATAL,
+ERROR, WARN, INFO, DEBUG, ALL or a <em>custom level</em> value. A
+custom level value can be specified in the form
+<code>level#classname</code>.
+
+If a level value is specified, then the root level is set
+to the corresponding level.  If no level value is specified,
+then the root level remains untouched.
+
+The root logger can be assigned multiple appenders.
+
+Each <i>appenderName</i> (separated by commas) will be added to
+the root logger. The named appender is defined using the
+appender syntax defined above.
+
+For non-root categories the syntax is almost the same:
+<pre>
+log4j.logger.logger_name=[level|INHERITED|NULL], appenderName, appenderName,
+...
+</pre>
+
+The meaning of the optional level value is discussed above
+in relation to the root logger. In addition however, the value
+INHERITED can be specified meaning that the named logger should
+inherit its level from the logger hierarchy.
+
+If no level value is supplied, then the level of the
+named logger remains untouched.
+
+By default categories inherit their level from the
+hierarchy. However, if you set the level of a logger and later
+decide that that logger should inherit its level, then you should
+specify INHERITED as the value for the level value. NULL is a
+synonym for INHERITED.
+
+Similar to the root logger syntax, each <i>appenderName</i>
+(separated by commas) will be attached to the named logger.
+
+See the <a href="concepts.html#appender-additivity">appender
+additivity rule</a> in the usage guide for the meaning of the
+<code>additivity</code> flag.
+
+<h4>Asynchronous logging</h4>
+To move log output processing overhead to a background thread,
+set the asynchronous property of the logger to <code>true</code>.
+For example:
+<pre>
+log4j.asynchronous.logger_name=true
+</pre>
+
+An asynchronous logger's appenders are attached to an {@link AsyncAppender AsyncAppender}
+and the {@link AsyncAppender AsyncAppender} is attached to the logger.
+The asynchronous property has no effect on a logger without attached appenders.
+
+The root logger can be configured to be asynchronous using:
+<pre>
+log4j.asynchronous.root=true
+</pre>
+
+<h3>Example</h3>
+
+An example configuration is given below.
+
+<pre>
+# Set options for appender named "A1".
+# Appender "A1" will be a SyslogAppender
+log4j.appender.A1=SyslogAppender
+
+# The syslog daemon resides on www.abc.net
+log4j.appender.A1.SyslogHost=www.abc.net
+
+# A1's layout is a PatternLayout, using the conversion pattern
+# "%r %-5p %c{2} %M.%L %x - %m%n". Thus, the log output will include
+# the relative time since the start of the application in milliseconds, followed by
+# the level of the log request, followed by
+# the two rightmost components of the logger name, followed by
+# the callers method name, followed by the line number,
+# the nested disgnostic context and finally the message itself.
+# Refer to the documentation of PatternLayout for further information
+# on the syntax of the ConversionPattern key.
+log4j.appender.A1.layout=PatternLayout
+log4j.appender.A1.layout.ConversionPattern=%-4r %-5p %%c{2} %%M.%%L %%x - %%m%%n
+
+# Set options for appender named "A2"
+# A2 should be a RollingFileAppender,
+# with maximum file size of 10 MB using at most one backup file.
+# A2's layout is: date and time (using the ISO8061 date format),
+# thread, level, logger name, nested diagnostic context
+# and finally the message itself.
+log4j.appender.A2=RollingFileAppender
+log4j.appender.A2.MaxFileSize=10MB
+log4j.appender.A2.MaxBackupIndex=1
+log4j.appender.A2.layout=PatternLayout
+log4j.appender.A2.layout.ConversionPattern=%%d [%%t] %%p %%c %%x - %%m%%n
+
+# Root logger set to DEBUG using the A2 appender defined above.
+log4j.rootLogger=DEBUG, A2
+
+# Logger definitions:
+# The SECURITY logger inherits is level from root. However, it's output
+# will go to A1 appender defined above. It's additivity is non-cumulative.
+log4j.logger.SECURITY=INHERIT, A1
+log4j.additivity.SECURITY=false
+
+# Only warnings or above will be logged for the logger "SECURITY.access".
+# Output will go to A1.
+log4j.logger.SECURITY.access=WARN
+
+# The logger "class.of.the.day" inherits its level from the
+# logger hierarchy.  Output will go to the appender's of the root
+# logger, A2 in this case.
+log4j.logger.class.of.the.day=INHERIT
+</pre>
+
+<h3>Dynamic option values</h3>
+
+All option <em>values</em> admit variable substitution. The
 syntax of variable substitution is similar to that of Unix
 shells. The string between an opening <b>&quot;${&quot;</b> and
 closing <b>&quot;}&quot;</b> is interpreted as a key. The value of
@@ -84,311 +235,152 @@ the configuration file itself. The value of the key is first
 searched in the system properties, and if not found there, it is
 then searched in the configuration file being parsed.  The
 corresponding value replaces the ${variableName} sequence. For
-example, if <code>java.home</code> system property is set to
+example, if <code>home</code> system property is set to
 <code>/home/xyz</code>, then every occurrence of the sequence
-<code>${java.home}</code> will be interpreted as
+<code>${home}</code> will be interpreted as
 <code>/home/xyz</code>.
+
+<h3>Repository-wide threshold</h3>
+
+The repository-wide threshold filters logging requests by level
+regardless of logger. The syntax is:
+
+<pre>
+log4j.threshold=[level]
+</pre>
+
+The level value can consist of the string values OFF, FATAL,
+ERROR, WARN, INFO, DEBUG, ALL or a <em>custom level</em> value. A
+custom level value can be specified in the form
+level#classname. By default the repository-wide threshold is set
+to the lowest possible value, namely the level <code>ALL</code>.
+
+<h3>Debugging</h3>
+
+It is sometimes useful to see how %log4cxx is reading configuration
+files. You can <a href="internal-debugging.html">enable %log4cxx internal logging</a>
+by defining the <b>log4j.debug</b> variable in the property file.
+<pre>
+# Enable internal logging
+log4j.debug=true
+</pre>
+
+<h3>Logger Factories</h3>
+
+The usage of custom logger factories is discouraged and no longer
+documented.
+
 */
-class LOG4CXX_EXPORT PropertyConfigurator :
-	virtual public spi::Configurator,
-	virtual public helpers::Object
+class LOG4CXX_EXPORT PropertyConfigurator
+	: public spi::Configurator
 {
-	protected:
-
-		/**
-		Used internally to keep track of configured appenders.
-		*/
-		std::map<LogString, AppenderPtr>* registry;
-
-		/**
-		Used to create new instances of logger
-		*/
-		std::shared_ptr<spi::LoggerFactory> loggerFactory;
-
+	private:
+		LOG4CXX_DECLARE_PRIVATE_MEMBER_PTR(PrivateData, m_priv)
 	public:
 		DECLARE_LOG4CXX_OBJECT(PropertyConfigurator)
 		BEGIN_LOG4CXX_CAST_MAP()
-		LOG4CXX_CAST_ENTRY(spi::Configurator)
+		LOG4CXX_CAST_ENTRY(PropertyConfigurator)
+		LOG4CXX_CAST_ENTRY_CHAIN(spi::Configurator)
 		END_LOG4CXX_CAST_MAP()
 
 		PropertyConfigurator();
 		virtual ~PropertyConfigurator();
-		/**
-		Read configuration from a file. <b>The existing configuration is
-		not cleared nor reset.</b> If you require a different behavior,
-		then call {@link LogManager#resetConfiguration
-		resetConfiguration} method before calling
-		<code>doConfigure</code>.
 
-		<p>The configuration file consists of statements in the format
-		<code>key=value</code>. The syntax of different configuration
-		elements are discussed below.
+		/** @copydoc spi::Configurator::isValid
 
-		<h3>Repository-wide threshold</h3>
-
-		<p>The repository-wide threshold filters logging requests by level
-		regardless of logger. The syntax is:
-
-		<pre>
-		log4j.threshold=[level]
-		</pre>
-
-		<p>The level value can consist of the string values OFF, FATAL,
-		ERROR, WARN, INFO, DEBUG, ALL or a <em>custom level</em> value. A
-		custom level value can be specified in the form
-		level#classname. By default the repository-wide threshold is set
-		to the lowest possible value, namely the level <code>ALL</code>.
-		</p>
-
-
-		<h3>Appender configuration</h3>
-
-		<p>Appender configuration syntax is:
-		<pre>
-		# For appender named <i>appenderName</i>, set its class.
-		# Note: The appender name can contain dots.
-		log4j.appender.appenderName=fully.qualified.name.of.appender.class
-
-		# Set appender specific options.
-		log4j.appender.appenderName.option1=value1
-		...
-		log4j.appender.appenderName.optionN=valueN
-		</pre>
-
-		For each named appender you can configure its {@link Layout Layout}. The
-		syntax for configuring an appender's layout is:
-		<pre>
-		log4j.appender.appenderName.layout=fully.qualified.name.of.layout.class
-		log4j.appender.appenderName.layout.option1=value1
-		....
-		log4j.appender.appenderName.layout.optionN=valueN
-		</pre>
-
-		<h3>Configuring loggers</h3>
-
-		<p>The syntax for configuring the root logger is:
-		<pre>
-		log4j.rootLogger=[level], appenderName, appenderName, ...
-		</pre>
-
-		<p>This syntax means that an optional <em>level</em> can be
-		supplied followed by appender names separated by commas.
-
-		<p>The level value can consist of the string values OFF, FATAL,
-		ERROR, WARN, INFO, DEBUG, ALL or a <em>custom level</em> value. A
-		custom level value can be specified in the form
-		<code>level#classname</code>.
-
-		<p>If a level value is specified, then the root level is set
-		to the corresponding level.  If no level value is specified,
-		then the root level remains untouched.
-
-		<p>The root logger can be assigned multiple appenders.
-
-		<p>Each <i>appenderName</i> (separated by commas) will be added to
-		the root logger. The named appender is defined using the
-		appender syntax defined above.
-
-		<p>For non-root categories the syntax is almost the same:
-		<pre>
-		log4j.logger.logger_name=[level|INHERITED|NULL], appenderName, appenderName,
-		...
-		</pre>
-
-		<p>The meaning of the optional level value is discussed above
-		in relation to the root logger. In addition however, the value
-		INHERITED can be specified meaning that the named logger should
-		inherit its level from the logger hierarchy.
-
-		<p>If no level value is supplied, then the level of the
-		named logger remains untouched.
-
-		<p>By default categories inherit their level from the
-		hierarchy. However, if you set the level of a logger and later
-		decide that that logger should inherit its level, then you should
-		specify INHERITED as the value for the level value. NULL is a
-		synonym for INHERITED.
-
-		<p>Similar to the root logger syntax, each <i>appenderName</i>
-		(separated by commas) will be attached to the named logger.
-
-		<p>See the <a href="Introduction.html#additivity">appender
-		additivity rule</a> in the user manual for the meaning of the
-		<code>additivity</code> flag.
-
-		<h3>Logger Factories</h3>
-
-		The usage of custom logger factories is discouraged and no longer
-		documented.
-
-		<h3>Example</h3>
-
-		<p>An example configuration is given below. Other configuration
-		file examples are given in the <code>examples</code> folder.
-
-		<pre>
-
-		# Set options for appender named "A1".
-		# Appender "A1" will be a SyslogAppender
-		log4j.appender.A1=SyslogAppender
-
-		# The syslog daemon resides on www.abc.net
-		log4j.appender.A1.SyslogHost=www.abc.net
-
-		# A1's layout is a PatternLayout, using the conversion pattern
-		# <b>%r %-5p %c{2} %M.%L %x - %m\n</b>. Thus, the log output will
-		# include # the relative time since the start of the application in
-		# milliseconds, followed by the level of the log request,
-		# followed by the two rightmost components of the logger name,
-		# followed by the callers method name, followed by the line number,
-		# the nested disgnostic context and finally the message itself.
-		# Refer to the documentation of PatternLayout for further information
-		# on the syntax of the ConversionPattern key.
-		log4j.appender.A1.layout=PatternLayout
-		log4j.appender.A1.layout.ConversionPattern=%-4r %-5p %c{2} %M.%L %x - %m\n
-
-		# Set options for appender named "A2"
-		# A2 should be a RollingFileAppender, with maximum file size of 10 MB
-		# using at most one backup file. A2's layout is TTCC, using the
-		# ISO8061 date format with context printing enabled.
-		log4j.appender.A2=RollingFileAppender
-		log4j.appender.A2.MaxFileSize=10MB
-		log4j.appender.A2.MaxBackupIndex=1
-		log4j.appender.A2.layout=TTCCLayout
-		log4j.appender.A2.layout.ContextPrinting=enabled
-		log4j.appender.A2.layout.DateFormat=ISO8601
-
-		# Root logger set to DEBUG using the A2 appender defined above.
-		log4j.rootLogger=DEBUG, A2
-
-		# Logger definitions:
-		# The SECURITY logger inherits is level from root. However, it's output
-		# will go to A1 appender defined above. It's additivity is non-cumulative.
-		log4j.logger.SECURITY=INHERIT, A1
-		log4j.additivity.SECURITY=false
-
-		# Only warnings or above will be logged for the logger "SECURITY.access".
-		# Output will go to A1.
-		log4j.logger.SECURITY.access=WARN
-
-
-		# The logger "class.of.the.day" inherits its level from the
-		# logger hierarchy.  Output will go to the appender's of the root
-		# logger, A2 in this case.
-		log4j.logger.class.of.the.day=INHERIT
-		</pre>
-
-		<p>Refer to the <b>setOption</b> method in each Appender and
-		Layout for class specific options.
-
-		<p>Use the <code>#</code> or <code>!</code> characters at the
-		beginning of a line for comments.
-
-		<p>
-		@param configFileName The name of the configuration file where the
-		configuration information is stored.
-		@param hierarchy The hierarchy to operation upon.
+		This implementation checks \c configFileName contains at least one line begining with "log4j.".
 		*/
-		void doConfigure(const File& configFileName,
-			spi::LoggerRepositoryPtr hierarchy);
+		bool isValid(const File& configFileName) override;
 
-		/**
-		Read configuration options from file <code>configFilename</code>.
+		/** @copydoc spi::Configurator::doConfigure()
+		See the \ref PropertyConfigurator_details "detailed description"
+		for the expected configuration file format.
+
+		Pre-existing key-value pairs in the property map provided by spi::Configurator::properties()
+		are used when expanding ${varname} instances in \c configFileName.
 		*/
-		static void configure(const File& configFilename);
+		spi::ConfigurationStatus doConfigure
+			( const File&                     configFileName
+			, const spi::LoggerRepositoryPtr& target = {}
+			) override;
 
 		/**
-		Like {@link #configureAndWatch(const File& configFilename, long delay)}
-		except that the
-		default delay as defined by helpers::FileWatchdog#DEFAULT_DELAY
-		is used.
-		@param configFilename A file in key=value format.
+		Apply the directives in \c configFileName to the spi::LoggerRepository held by LogManager.
+
+		Pre-existing key-value pairs in the property map provided by spi::Configurator::properties()
+		are used when expanding ${varname} instances in \c configFileName.
+
+		See the \ref PropertyConfigurator_details "detailed description"
+		for the expected configuration file format.
+
+		<b>The existing configuration is not cleared nor reset.</b>
+		If you require a different behavior,
+		call {@link spi::LoggerRepository::resetConfiguration resetConfiguration}
+		before calling <code>doConfigure</code>.
 		*/
-		static void configureAndWatch(const File& configFilename);
+		static spi::ConfigurationStatus configure(const File& configFilename);
 
 		/**
-		Read the configuration file <code>configFilename</code> if it
-		exists. Moreover, a thread will be created that will periodically
-		check if <code>configFilename</code> has been created or
-		modified. The period is determined by the <code>delay</code>
-		argument. If a change or file creation is detected, then
-		<code>configFilename</code> is read to configure log4j.
+		Apply the directives in \c configFileName to the spi::LoggerRepository held by LogManager.
+
+		Pre-existing key-value pairs in the property map provided by spi::Configurator::properties()
+		are used when expanding ${varname} instances in \c configFileName.
+
+		<b>The existing configuration is not cleared nor reset.</b>
+		If you require a different behavior,
+		call {@link spi::LoggerRepository::resetConfiguration resetConfiguration}
+		before calling <code>doConfigure</code>.
+
+		A task will be created that periodically checks
+		whether \c configFilename has been created or modified.
+		A period of log4cxx::helpers::FileWatchdog#DEFAULT_DELAY
+		is used if \c millisecondDelay is not a positive number.
+		If a change or file creation is detected,
+		then \c configFilename is read to configure Log4cxx.
+
+		The task will be stopped by a LogManager::shutdown call.
 
 		@param configFilename A file in key=value format.
-		@param delay The delay in milliseconds to wait between each check.
+		@param millisecondDelay The duration to wait between each check.
 		*/
-		static void configureAndWatch(const File& configFilename,
-			long delay);
+		static spi::ConfigurationStatus configureAndWatch
+			( const File& configFilename
+			, long        millisecondDelay = 0
+			);
 
 		/**
-		Read configuration options from <code>properties</code>.
-		See #doConfigure(const File&, log4cxx::spi::LoggerRepositoryPtr&)
-		for the expected format.
+		Apply the directives in \c properties to the spi::LoggerRepository held by LogManager.
+
+		See the \ref PropertyConfigurator_details "detailed description"
+		for the expected keys and values.
+
+		<b>The existing configuration is not cleared nor reset.</b>
+		If you require a different behavior,
+		call {@link spi::LoggerRepository::resetConfiguration resetConfiguration}
+		before calling <code>doConfigure</code>.
 		*/
-		static void configure(helpers::Properties& properties);
+		static spi::ConfigurationStatus configure(helpers::Properties& properties);
 
 		/**
-		Read configuration options from <code>properties</code>.
-		See #doConfigure(const File&, log4cxx::spi::LoggerRepositoryPtr&)
-		for the expected format.
+		Apply the directives in \c properties to \c target.
+
+		See the \ref PropertyConfigurator_details "detailed description"
+		for the expected keys and values.
+
+		<b>The existing configuration is not cleared nor reset.</b>
+		If you require a different behavior,
+		call {@link spi::LoggerRepository::resetConfiguration resetConfiguration}
+		before calling <code>doConfigure</code>.
 		*/
-		void doConfigure(helpers::Properties& properties,
-			spi::LoggerRepositoryPtr hierarchy);
-
-		// --------------------------------------------------------------------------
-		// Internal stuff
-		// --------------------------------------------------------------------------
-	protected:
-		/**
-		Check the provided <code>Properties</code> object for a
-		#loggerFactory
-		entry specified by LOGGER_FACTORY_KEY.  If such an entry
-		exists, an attempt is made to create an instance using the default
-		constructor.  This instance is used for subsequent Logger creations
-		within this configurator.
-		@see #parseCatsAndRenderers
-		*/
-		void configureLoggerFactory(helpers::Properties& props);
-
-		void configureRootLogger(helpers::Properties& props,
-			spi::LoggerRepositoryPtr& hierarchy);
-
-		/**
-		Parse non-root elements, such non-root categories and renderers.
-		*/
-		void parseCatsAndRenderers(helpers::Properties& props,
-			spi::LoggerRepositoryPtr& hierarchy);
-
-		/**
-		Parse the additivity option for a non-root logger.
-		*/
-		bool parseAdditivityForLogger(helpers::Properties& props,
-			LoggerPtr& cat, const LogString& loggerName);
-
-		/**
-		This method must work for the root logger as well.
-		*/
-		void parseLogger(
-			helpers::Properties& props, LoggerPtr& logger,
-			const LogString& optionKey, const LogString& loggerName,
-			const LogString& value, bool additivity);
-
-		AppenderPtr parseAppender(
-			helpers::Properties& props, const LogString& appenderName);
-
-		void registryPut(const AppenderPtr& appender);
-		AppenderPtr registryGet(const LogString& name);
-
+		spi::ConfigurationStatus doConfigure
+			( helpers::Properties&            properties
+			, const spi::LoggerRepositoryPtr& target
+			);
 	private:
 		PropertyConfigurator(const PropertyConfigurator&);
 		PropertyConfigurator& operator=(const PropertyConfigurator&);
-		static PropertyWatchdog* pdog;
 }; // class PropertyConfigurator
 }  // namespace log4cxx
-
-#if defined(_MSC_VER)
-	#pragma warning (pop)
-#endif
 
 
 #endif //_LOG4CXX_PROPERTY_CONFIGURATOR_H

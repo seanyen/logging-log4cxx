@@ -20,7 +20,7 @@
 
 #include <log4cxx/pattern/patternconverter.h>
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 namespace pattern
 {
@@ -34,18 +34,14 @@ namespace pattern
  */
 class LOG4CXX_EXPORT IntegerPatternConverter : public PatternConverter
 {
-
-		/**
-		 * Private constructor.
-		 */
-		IntegerPatternConverter();
-
 	public:
 		DECLARE_LOG4CXX_PATTERN(IntegerPatternConverter)
 		BEGIN_LOG4CXX_CAST_MAP()
 		LOG4CXX_CAST_ENTRY(IntegerPatternConverter)
 		LOG4CXX_CAST_ENTRY_CHAIN(PatternConverter)
 		END_LOG4CXX_CAST_MAP()
+
+		IntegerPatternConverter();
 
 		/**
 		 * Obtains an instance of pattern converter.
@@ -55,9 +51,8 @@ class LOG4CXX_EXPORT IntegerPatternConverter : public PatternConverter
 		static PatternConverterPtr newInstance(
 			const std::vector<LogString>& options);
 
-		void format(const log4cxx::helpers::ObjectPtr& obj,
-			LogString& toAppendTo,
-			log4cxx::helpers::Pool& p) const;
+		using PatternConverter::format;
+		void format( const helpers::ObjectPtr& obj, LogString& toAppendTo ) const override;
 };
 
 LOG4CXX_PTR_DEF(IntegerPatternConverter);

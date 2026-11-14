@@ -20,6 +20,12 @@
 #include "../insertwide.h"
 #include "../logunit.h"
 #include <log4cxx/logstring.h>
+#include <log4cxx/helpers/loglog.h>
+#include <log4cxx/helpers/transcoder.h>
+#include <log4cxx/logger.h>
+#include <log4cxx/propertyconfigurator.h>
+#include "util/compare.h"
+#include <cassert>
 
 #if LOG4CXX_CFSTRING_API
 	#include <CoreFoundation/CFString.h>
@@ -41,20 +47,27 @@ LOGUNIT_CLASS(MessageBufferTest)
 	LOGUNIT_TEST(testInsertNull);
 	LOGUNIT_TEST(testInsertInt);
 	LOGUNIT_TEST(testInsertManipulator);
+	LOGUNIT_TEST(testBaseChange);
 #if LOG4CXX_WCHAR_T_API
 	LOGUNIT_TEST(testInsertConstWStr);
 	LOGUNIT_TEST(testInsertWString);
 	LOGUNIT_TEST(testInsertWStr);
 #endif
-#if LOG4CXX_UNICHAR_API
-	LOGUNIT_TEST(testInsertConstUStr);
-	LOGUNIT_TEST(testInsertUString);
-#endif
 #if LOG4CXX_CFSTRING_API
 	LOGUNIT_TEST(testInsertCFString);
 #endif
+	LOGUNIT_TEST(testInsertCalculatedValue);
 	LOGUNIT_TEST_SUITE_END();
 
+
+#ifdef _DEBUG
+	struct Fixture
+	{
+		Fixture() {
+			helpers::LogLog::setInternalDebugging(true);
+		}
+	} suiteFixture;
+#endif
 
 public:
 	void testInsertChar()
@@ -126,6 +139,31 @@ public:
 		LOGUNIT_ASSERT_EQUAL(true, buf.hasStream());
 	}
 
+	void testBaseChange()
+	{
+		LoggerPtr root;
+		LoggerPtr logger;
+
+		root = Logger::getRootLogger();
+		logger = Logger::getLogger(LOG4CXX_STR("java.org.apache.log4j.PatternLayoutTest"));
+
+		auto status = PropertyConfigurator::configure(LOG4CXX_FILE("input/messagebuffer1.properties"));
+		LOGUNIT_ASSERT_EQUAL(status, spi::ConfigurationStatus::Configured);
+
+		int num = 220;
+		LOG4CXX_INFO(logger, "number in hex: " << std::hex << num);
+		LOG4CXX_INFO(logger, "number in dec: " << num);
+
+		LOGUNIT_ASSERT(Compare::compare(LOG4CXX_STR("output/messagebuffer"), LOG4CXX_FILE("witness/messagebuffer.1")));
+
+		auto rep = root->getLoggerRepository();
+
+		if (rep)
+		{
+			rep->resetConfiguration();
+		}
+	}
+
 #if LOG4CXX_WCHAR_T_API
 	void testInsertConstWStr()
 	{
@@ -161,50 +199,66 @@ public:
 	}
 #endif
 
-#if LOG4CXX_UNICHAR_API
-	void testInsertConstUStr()
-	{
-		MessageBuffer buf;
-		const log4cxx::UniChar hello[] = { 'H', 'e', 'l', 'l', 'o', 0 };
-		const log4cxx::UniChar world[] = { ',', ' ', 'W', 'o', 'r', 'l', 'd', 0 };
-		const log4cxx::UniChar greeting[] = { 'H', 'e', 'l', 'l', 'o',
-				',', ' ', 'W', 'o', 'r', 'l', 'd', 0
-			};
-		UniCharMessageBuffer& retval = buf << hello << world;
-		LOGUNIT_ASSERT_EQUAL(std::basic_string<log4cxx::UniChar>(greeting), buf.str(retval));
-		LOGUNIT_ASSERT_EQUAL(false, buf.hasStream());
-	}
-
-	void testInsertUString()
-	{
-		MessageBuffer buf;
-		const log4cxx::UniChar hello[] = { 'H', 'e', 'l', 'l', 'o', 0 };
-		const log4cxx::UniChar world[] = { ',', ' ', 'W', 'o', 'r', 'l', 'd', 0 };
-		const log4cxx::UniChar greeting[] = { 'H', 'e', 'l', 'l', 'o',
-				',', ' ', 'W', 'o', 'r', 'l', 'd', 0
-			};
-		UniCharMessageBuffer& retval = buf << std::basic_string<log4cxx::UniChar>(hello)
-			<< std::basic_string<log4cxx::UniChar>(world);
-		LOGUNIT_ASSERT_EQUAL(std::basic_string<log4cxx::UniChar>(greeting), buf.str(retval));
-		LOGUNIT_ASSERT_EQUAL(false, buf.hasStream());
-	}
-
-#endif
-
 #if LOG4CXX_CFSTRING_API
 	void testInsertCFString()
 	{
 		MessageBuffer buf;
-		const log4cxx::UniChar greeting[] = { 'H', 'e', 'l', 'l', 'o',
+		const log4cxx::logchar greeting[] = { 'H', 'e', 'l', 'l', 'o',
 				',', ' ', 'W', 'o', 'r', 'l', 'd', 0
 			};
-		UniCharMessageBuffer& retval = buf << CFSTR("Hello")
+		CharMessageBuffer& retval = buf << CFSTR("Hello")
 			<< CFSTR(", World");
-		LOGUNIT_ASSERT_EQUAL(std::basic_string<log4cxx::UniChar>(greeting), buf.str(retval));
+		LOGUNIT_ASSERT_EQUAL(std::basic_string<log4cxx::logchar>(greeting), buf.str(retval));
 		LOGUNIT_ASSERT_EQUAL(false, buf.hasStream());
 	}
-
 #endif
+
+	// Use the Gregory-Leibniz series to approximate π
+	static double calculatePi(int terms, int level, int initialTerm = 0)
+	{
+		double pi = 0.0;
+		if (0 < level)
+		{
+			MessageBuffer buf;
+			auto& retval = buf << LOG4CXX_STR("level ") << level << " pi " << std::setprecision(6) << (pi = calculatePi(terms * 2, level - 1, terms));
+			assert(buf.hasStream());
+			auto msg = buf.str(retval);
+			LOG4CXX_DECODE_CHAR(lsMsg, msg);
+			helpers::LogLog::debug(lsMsg);
+			pi /= 4; // Divide by 4 to get the value of the previous level
+		}
+		for (int i = initialTerm; i < terms; i++)
+		{
+			if (i % 2 == 0)
+			{
+				pi += 1.0 / (2 * i + 1); // Add for even index
+			}
+			else
+			{
+				pi -= 1.0 / (2 * i + 1); // Subtract for odd index
+			}
+			if ((i + 1) % 500 == 0)
+			{
+				MessageBuffer buf;
+				auto& retval = buf << LOG4CXX_STR("level ") << level << " term " << i << " pi " << std::setprecision(6) << (pi * 4);
+				assert(buf.hasStream());
+				auto msg = buf.str(retval);
+				LOG4CXX_DECODE_CHAR(lsMsg, msg);
+				helpers::LogLog::debug(lsMsg);
+			}
+		}
+		return pi * 4; // Multiply by 4 to get Pi
+	}
+
+	// Checks what happens with 4 concurrently active MessageBuffer objects in the same thread, each using using a std::stringstream.
+	void testInsertCalculatedValue()
+	{
+		MessageBuffer buf;
+		std::string expectedValue("pi=3.142 calculated pi=3.141 using 4000 terms");
+		auto& retval = buf << "pi=" << std::setprecision(4) << 3.14159265358979323846 << " calculated pi=" << std::setprecision(4) << calculatePi(1000, 2) << " using 4000 terms";
+		LOGUNIT_ASSERT_EQUAL(true, buf.hasStream());
+		LOGUNIT_ASSERT_EQUAL(expectedValue, buf.str(retval));
+	}
 
 };
 

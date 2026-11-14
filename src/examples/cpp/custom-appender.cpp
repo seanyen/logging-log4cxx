@@ -15,14 +15,12 @@
  * limitations under the License.
  */
 
-#include <stdlib.h>
 #include <log4cxx/basicconfigurator.h>
-#include <log4cxx/helpers/object.h>
 #include <log4cxx/appenderskeleton.h>
 #include <log4cxx/helpers/stringhelper.h>
 #include <log4cxx/xml/domconfigurator.h>
 
-namespace log4cxx {
+namespace com::foo {
 
 class NullWriterAppender : public log4cxx::AppenderSkeleton {
 public:
@@ -34,37 +32,38 @@ public:
 
 	NullWriterAppender(){}
 
-	virtual void close(){}
-
-	virtual bool requiresLayout() const {
-		return false;
-	}
-
-	virtual void append(const spi::LoggingEventPtr& event, log4cxx::helpers::Pool& p){
+	void append( const log4cxx::spi::LoggingEventPtr& ) override {
 		// This gets called whenever there is a valid event for our appender.
 	}
 
-	virtual void activateOptions(log4cxx::helpers::Pool& /* pool */) {
+	void activateOptions() override {
 		// Given all of our options, do something useful(e.g. open a file)
 	}
 
-	virtual void setOption(const LogString& option, const LogString& value){
-		if (helpers::StringHelper::equalsIgnoreCase(option,
-										   LOG4CXX_STR("SOMEVALUE"), LOG4CXX_STR("somevalue"))){
+	void setOption(const log4cxx::LogString& option, const log4cxx::LogString& value) override {
+		if (log4cxx::helpers::StringHelper::equalsIgnoreCase
+			( option
+			, LOG4CXX_STR("SOMEVALUE")
+			, LOG4CXX_STR("somevalue")
+			))
+		{
 			// Do something with the 'value' here.
+			(void)value;
 		}
 	}
 };
 
+// Register our appender with Log4cxx at startup
 IMPLEMENT_LOG4CXX_OBJECT(NullWriterAppender)
 
-}
+} // namespace com::foo
 
-int main( int argc, char** argv ){
+int main()
+{
 	log4cxx::xml::DOMConfigurator::configure( "custom-appender.xml" );
 
-	log4cxx::LoggerPtr rootLogger = log4cxx::Logger::getRootLogger();
-	log4cxx::LoggerPtr nullLogger = log4cxx::Logger::getLogger( "NullLogger" );
+	auto rootLogger = log4cxx::Logger::getRootLogger();
+	auto nullLogger = log4cxx::Logger::getLogger( "NullLogger" );
 
 	LOG4CXX_INFO( rootLogger, "This is some root message" );
 	LOG4CXX_INFO( nullLogger, "This message will be discarded" );

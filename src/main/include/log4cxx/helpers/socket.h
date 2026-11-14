@@ -18,73 +18,75 @@
 #ifndef _LOG4CXX_HELPERS_SOCKET_H
 #define _LOG4CXX_HELPERS_SOCKET_H
 
-extern "C" {
-	struct apr_socket_t;
-}
-
-
 #include <log4cxx/helpers/inetaddress.h>
-#include <log4cxx/helpers/pool.h>
 
-
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 namespace helpers
 {
 class ByteBuffer;
+
+class Socket;
+LOG4CXX_PTR_DEF(Socket);
+LOG4CXX_UNIQUE_PTR_DEF(Socket);
+
 /**
-<p>This class implements client sockets (also called just "sockets"). A socket
-is an endpoint for communication between two machines.
-<p>The actual work of the socket is performed by an instance of the SocketImpl
-class. An application, by changing the socket factory that creates the socket
-implementation, can configure itself to create sockets appropriate to the
-local firewall.
+Abstract base class for an outgoing socket connection.
+A socket is an endpoint for communication between
+two network connected machines or processes.
 */
 class LOG4CXX_EXPORT Socket : public helpers::Object
 {
+	protected:
+		LOG4CXX_DECLARE_PRIVATE_MEMBER_PTR(SocketPrivate, m_priv)
+		Socket(LOG4CXX_PRIVATE_PTR(SocketPrivate) priv);
+
 	public:
 		DECLARE_ABSTRACT_LOG4CXX_OBJECT(Socket)
 		BEGIN_LOG4CXX_CAST_MAP()
 		LOG4CXX_CAST_ENTRY(Socket)
 		END_LOG4CXX_CAST_MAP()
 
-		/** Creates a stream socket and connects it to the specified port
-		number at the specified IP address.
+		virtual ~Socket();
+
+		virtual size_t write(ByteBuffer&) = 0;
+
+		/**
+		Use \c newValue for the behaviour when the network buffer (on an accepted socket connection) is full.
+
+		When true, an exception is thrown if the write would block.
 		*/
-		Socket(InetAddressPtr& address, int port);
-		Socket(apr_socket_t* socket, apr_pool_t* pool);
-		~Socket();
+		virtual void setNonBlocking(bool newValue) = 0;
 
-		size_t write(ByteBuffer&);
+		/// Open this socket.
+		virtual void open() = 0;
 
-		/** Closes this socket. */
-		void close();
+		/// Is this available for use?
+		virtual bool is_open() = 0;
+
+		/** Close this socket. */
+		virtual void close() = 0;
 
 		/** Returns the value of this socket's address field. */
 		InetAddressPtr getInetAddress() const;
 
 		/** Returns the value of this socket's port field. */
 		int getPort() const;
+
+		/** Use \c newAddress and \c newPort as the destination. */
+		void setAttributes(const InetAddressPtr& newAddress, int newPort);
+
+		/** Create a concrete instance of this class
+		*/
+		static SocketUniquePtr create(const InetAddressPtr& address, int port, const LogString& concreteClassName = {});
 	private:
 		Socket(const Socket&);
 		Socket& operator=(const Socket&);
 
-		Pool pool;
-
-		apr_socket_t* socket;
-
-
-		/** The IP address of the remote end of this socket. */
-		InetAddressPtr address;
-
-		/** The port number on the remote host to which
-		this socket is connected. */
-		int port;
 };
-
-LOG4CXX_PTR_DEF(Socket);
 
 } // namespace helpers
 } // namespace log4cxx
+
 
 #endif // _LOG4CXX_HELPERS_SOCKET_H

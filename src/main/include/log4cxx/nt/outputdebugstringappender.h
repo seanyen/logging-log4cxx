@@ -20,7 +20,7 @@
 
 #include <log4cxx/appenderskeleton.h>
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 namespace nt
 {
@@ -35,14 +35,7 @@ class LOG4CXX_EXPORT OutputDebugStringAppender : public AppenderSkeleton
 
 		OutputDebugStringAppender();
 
-		bool requiresLayout() const
-		{
-			return true;
-		}
-
-		virtual void close() {}
-
-		virtual void append(const spi::LoggingEventPtr& event, log4cxx::helpers::Pool& p);
+		void append( const spi::LoggingEventPtr& event ) override;
 };
 }
 }

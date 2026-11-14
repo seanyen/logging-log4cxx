@@ -1,4 +1,4 @@
-FAQ {#faq}
+Frequently Asked Technical Questions {#faq}
 ===
 <!--
  Note: License header cannot be first, as doxygen does not generate
@@ -20,17 +20,21 @@ FAQ {#faq}
  See the License for the specific language governing permissions and
  limitations under the License.
 -->
+[TOC]
 
-# Frequently Asked Technical Questions
-## <a name="table_of_contents"></a>Table of contents
+## Why doesn't Log4cxx use buffered asynchronous output by default?{#buffered_output}
 
-<ol>
-	<li><a href="#custom_levels">How do I add a custom level to Apache Log4cxx?</a></li>
-	<li><a href="#msvc_crash">My application on Windows crashes on shutdown?</a></li>
-	<li><a href="#unicode_supported">Does Apache Log4cxx support Unicode?</a></li>
-</ol>
+Being able to examine logged values is critically important during application development.
+Buffering output prevents the log file from containing the lastest messages in two situations:
+-# when a debugger stops the application at a break point
+-# when the application aborts abnormally
+(e.g. calls [std::terminate](https://en.cppreference.com/w/cpp/error/terminate.html)
+or the operating system detects a fault)
 
-## <a name="custom_levels"></a>How do I add a custom level to Apache Log4cxx?
+Debugging a program becomes extremely confusing when the log file
+does not contain the most recently written logging requests.
+
+## How do I add a custom level to Apache Log4cxx?{#custom_levels}
 
 This is a common topic for all the Apache logging frameworks and typically motivated to try to
 categorize events by functionality or audience.  An common request is to add an AUDIT level so that
@@ -42,7 +46,7 @@ to use a logger names like "AUDIT.com.example.MyPackage.MyClass" that allow all 
 routed to a particular appender. If you attempted to use a level for that then you would lose the
 ability to distinguish between different significances within the audit messages.
 
-## <a name="msvc_crash"></a>My application on Windows crashes on shutdown?
+## My application on Windows crashes on shutdown?{#msvc_crash}
 
 Apache Log4cxx API calls use C++ Standard Template Library string parameters. If the caller is using
 a different instance or type of the C Runtime Library that Log4cxx, then it is very likely that some
@@ -50,19 +54,42 @@ memory that was originally allocated by Log4cxx would be freed by the caller. If
 caller are using different C RTL's, the program will likely crash at the point. Use "Multithread
 DLL" with release builds of Log4cxx and "Multithread DLL Debug" with debug builds.
 
-## <a name="unicode_supported"></a>Does Apache Log4cxx support Unicode?
+## Does Apache Log4cxx support Unicode?{#unicode_supported}
 
-Yes. Apache Log4cxx exposes API methods in multiple string flavors supporting differently encoded
-textual content, like `char*`, `std::string`, `wchar_t*`, `std::wstring`, `CFStringRef` et al. All
-provided texts will be converted to the `LogString` type before further processing, which is one of
-several supported Unicode representations selected by the `--with-logchar` option. If methods are
-used that take `LogString` as arguments, the macro `LOG4CXX_STR()` can be used to convert literals
-to the current `LogString` type. FileAppenders support an encoding property as well, which should be
-explicitly specified to `UTF-8` or `UTF-16` for e.g. XML files. The important point is to get the
-chain of input, internal processing and output correct and that might need some additional setup in
-the app using Log4cxx:
+Yes.
+API methods are provided for multiple string types including
+`char*`, `std::string`, `wchar_t*`, `std::wstring` and optionally `CFStringRef` and `QString`.
+Log4cxx expects `char*` and `std::string` arguments to contain valid UTF-8 byte sequences.
+Where required, the string will be converted to the Log4cxx internal type before further processing.
 
-According to the [libc documentation](https://www.gnu.org/software/libc/manual/html_node/Setting-the-Locale.html),
+The internally used string type, `LogString`, is chosen by the `LOG4CXX_CHAR` cmake option.
+It is either `std::basic_string<char>` or `std::basic_string<wchar_t>`.
+Use the `LOG4CXX_STR()` macro to convert a literal string
+to the current `LogString` type when calling a Log4cxx API method
+that expects a `LogString` argument.
+
+The default external representation is controlled by the `LOG4CXX_CHARSET` cmake option.
+This default is used to encode a multi-byte characters
+unless an `Encoding` property is explicitly configured
+for the log4cxx::FileAppender specialization you use.
+Note you should use `UTF-8` or `UTF-16` encoding when writing XML or JSON layouts.
+Log4cxx also implements character set encodings for `US-ASCII` (`ISO646-US` or `ANSI_X3.4-1968`)
+and `ISO-8859-1` (`ISO-LATIN-1` or `CP1252`).
+You are highly encouraged to stick to `UTF-8` for the best support from tools and operating systems.
+
+The `locale` character set encoding provides support beyond the above internally implemented options.
+It allows you to use any multi-byte encoding provided by the standard library.
+If using the `locale` character set encoding or
+you use `fwide` to make `stdout` or `stderr` wide-oriented (log4cxx::ConsoleAppender then uses `fputws`)
+you will need to explicitly configure the system locale at startup,
+for example by using:
+
+```
+std::setlocale( LC_ALL, "" ); /* Set user-preferred locale for C functions */
+std::locale::global(std::locale("")); /* Set user-preferred locale for C++ functions */
+```
+
+This is necessary because, according to the [libc documentation](https://www.gnu.org/software/libc/manual/html_node/Setting-the-Locale.html),
 all programs start in the `C` locale by default, which is the [same as ANSI_X3.4-1968](https://stackoverflow.com/questions/48743106/whats-ansi-x3-4-1968-encoding)
 and what's commonly known as the encoding `US-ASCII`. That encoding supports a very limited set of
 characters only, so inputting Unicode with that encoding in effect to output characters can't work
@@ -78,15 +105,14 @@ loggername - ?????????? ???? ??????????????
 ```
 
 The important thing to understand is that this is some always applied, backwards compatible default
-behaviour and even the case when the current environment sets a locale like `en_US.UTF-8`. One might
-need to explicitly tell the app at startup to use the locale of the environment and make things
-compatible with Unicode this way. See also [some SO post](https://stackoverflow.com/questions/571359/how-do-i-set-the-proper-initial-locale-for-a-c-program-on-windows)
-on setting the default locale in C++.
+behaviour and even the case when the current environment sets a locale like `en_US.UTF-8`.
 
-```
-std::setlocale( LC_ALL, "" ); /* Set locale for C functions */
-std::locale::global(std::locale("")); /* set locale for C++ functions */
-```
+## Does Log4cxx support logging at process termination?{#atexit_events}
 
-See [LOGCXX-483](https://issues.apache.org/jira/browse/LOGCXX-483) or [GHPR #31](https://github.com/apache/logging-log4cxx/pull/31#issuecomment-668870727)
-for additional details.
+Log4cxx must be built with -DLOG4CXX_EVENTS_AT_EXIT=ON to use logging during the application
+termination (i.e. in static destructors and other atexit() functions).
+When this option is used (and log4cxx::LogManager::shutdown is <b>not</b> called),
+loggers and appenders are not destroyed, files are not closed
+and [apr_terminate](https://apr.apache.org/docs/apr/1.6/group__apr__library.html) is not called in Log4cxx destructors.
+Instead the Log4cxx destructor will simply shutdown any background thread
+and flush any buffered output.

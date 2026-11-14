@@ -1,0 +1,138 @@
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+name: log4cxx-ubuntu
+
+on: [push, pull_request]
+
+jobs:
+  job:
+    name: ${{ matrix.os }}-${{ matrix.cxx }}-build-and-test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        name: [ubuntu24-gcc, ubuntu24-clang, ubuntu26-gcc, ubuntu26-clang]
+        include:
+          - name: ubuntu24-gcc
+            os: ubuntu-24.04
+            cxx: g++
+            fmt: OFF
+            qt: ON
+            qt6: OFF
+            odbc: OFF
+            multiprocess: ON
+            multithread: OFF
+            exitevents: OFF
+            fuzzers: OFF
+            logchar: utf-8
+            next_abi: OFF
+          - name: ubuntu24-clang
+            os: ubuntu-24.04
+            cxx: clang++
+            fmt: OFF
+            qt: OFF
+            qt6: OFF
+            odbc: ON
+            multiprocess: OFF
+            multithread: OFF
+            exitevents: OFF
+            fuzzers: ON
+            logchar: utf-8
+            next_abi: OFF
+          - name: ubuntu26-gcc
+            os: ubuntu-26.04
+            cxx: g++
+            fmt: ON
+            qt: ON
+            qt6: ON
+            odbc: OFF
+            multiprocess: OFF
+            multithread: ON
+            exitevents: ON
+            fuzzers: OFF
+            logchar: utf-8
+            next_abi: ON
+          - name: ubuntu26-clang
+            os: ubuntu-26.04
+            cxx: clang++
+            fmt: OFF
+            qt: OFF
+            qt6: OFF
+            odbc: OFF
+            multiprocess: OFF
+            multithread: ON
+            exitevents: OFF
+            fuzzers: ON
+            logchar: wchar_t
+            next_abi: OFF
+
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        persist-credentials: false # do not persist auth token in the local git config
+        path: main
+
+    - name: 'Configure Dependencies'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libapr1-dev libaprutil1-dev
+        if [ ${{ matrix.fmt }} == ON ]; then sudo apt-get install -y libfmt-dev; fi
+        if [ ${{ matrix.odbc }} == ON ]; then sudo apt-get install -y unixodbc-dev; fi
+        if [ ${{ matrix.qt }} == ON ] && [ ${{ matrix.qt6 }} == OFF ]; then sudo apt-get install -y qtbase5-dev; fi
+        if [ ${{ matrix.qt }} == ON ] && [ ${{ matrix.qt6 }} == ON ]; then sudo apt-get install -y qt6-base-dev; fi
+
+    - name: 'run cmake - posix'
+      run: |
+        ROOT=`pwd`
+        set -x
+        cmake \
+          -DCMAKE_CXX_COMPILER=${{ matrix.cxx }} \
+          -DLOG4CXX_TEST_ONLY_BUILD=1 \
+          -DLOG4CXX_ENABLE_ODBC=${{ matrix.odbc }} \
+          -DLOG4CXX_QT_SUPPORT=${{ matrix.qt }} \
+          -DENABLE_MULTITHREAD_TEST=${{ matrix.multithread }} \
+          -DLOG4CXX_MULTIPROCESS_ROLLING_FILE_APPENDER=${{ matrix.multiprocess }} \
+          -DLOG4CXX_EVENTS_AT_EXIT=${{ matrix.exitevents }} \
+          -DBUILD_FUZZERS=${{ matrix.fuzzers }} \
+          -DLOG4CXX_CHAR=${{ matrix.logchar }} \
+          -DLOG4CXX_BUILD_NEXT_ABI=${{ matrix.next_abi }} \
+          -DCMAKE_INSTALL_PREFIX=$ROOT/lib \
+          -S $ROOT/main \
+          -B $ROOT/build
+        cmake --build $ROOT/build --target install
+
+    - name: 'test installation'
+      run: |
+        ROOT=`pwd`
+        set -x
+        cmake \
+          -DCMAKE_PREFIX_PATH=$ROOT/lib \
+          -S $ROOT/main/src/examples/cpp/MyApp \
+          -B $ROOT/MyApp-build
+        cmake --build $ROOT/MyApp-build
+        if [ ${{ matrix.qt }} == ON ]; then
+            cmake \
+              -DCMAKE_PREFIX_PATH=$ROOT/lib \
+              -S $ROOT/main/src/examples/cpp/MyApp-qt \
+              -B $ROOT/MyApp-qt-build
+            cmake --build $ROOT/MyApp-qt-build
+        fi
+
+    - name: run unit tests
+      timeout-minutes: 10
+      run: |
+        ROOT=`pwd`
+        cd $ROOT/build
+        ctest -C Debug --output-on-failure

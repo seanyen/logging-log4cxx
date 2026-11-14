@@ -20,9 +20,27 @@
 #include <log4cxx/helpers/inputstreamreader.h>
 #include <log4cxx/helpers/exception.h>
 #include <log4cxx/helpers/pool.h>
+#include <cctype>
+#include <algorithm>
 
-using namespace log4cxx;
-using namespace log4cxx::helpers;
+using namespace LOG4CXX_NS;
+using namespace LOG4CXX_NS::helpers;
+
+template <typename Char>
+struct Properties::Less
+{
+	bool operator()(const std::basic_string<Char>& str1, const std::basic_string<Char>& str2) const
+	{
+		return std::lexicographical_compare
+			( str1.begin(), str1.end()
+			, str2.begin(), str2.end()
+			, [](Char c1, Char c2)
+				{
+					return std::tolower(static_cast<unsigned char>(c1)) < std::tolower(static_cast<unsigned char>(c2));
+				}
+			);
+	}
+};
 
 class PropertyParser
 {
@@ -399,6 +417,18 @@ Properties::Properties() : properties(new PropertyMap())
 {
 }
 
+Properties::Properties(const Properties& other)
+	: properties(new PropertyMap(*other.properties))
+{
+}
+
+Properties& Properties::operator=(const Properties& other)
+{
+	delete this->properties;
+	this->properties = new PropertyMap(*other.properties);
+	return *this;
+}
+
 Properties::~Properties()
 {
 	delete properties;
@@ -427,15 +457,10 @@ LogString Properties::get(const LogString& key) const
 	return (it != properties->end()) ? it->second : LogString();
 }
 
-void Properties::load(InputStreamPtr inStream)
+void Properties::load(const InputStreamPtr& inStream)
 {
-	Pool pool;
-	InputStreamReaderPtr lineReader(
-		new InputStreamReader(inStream, CharsetDecoder::getISOLatinDecoder()));
-	LogString contents = lineReader->read(pool);
-	properties->clear();
-	PropertyParser parser;
-	parser.parse(contents, *this);
+	auto contents = InputStreamReader(inStream, CharsetDecoder::getISOLatinDecoder()).read();
+	PropertyParser().parse(contents, *this);
 }
 
 std::vector<LogString> Properties::propertyNames() const
@@ -443,14 +468,16 @@ std::vector<LogString> Properties::propertyNames() const
 	std::vector<LogString> names;
 	names.reserve(properties->size());
 
-	PropertyMap::const_iterator it;
-
-	for (it = properties->begin(); it != properties->end(); it++)
+	for (auto const& item : *properties)
 	{
-		const LogString& key = it->first;
+		const LogString& key = item.first;
 		names.push_back(key);
 	}
 
 	return names;
 }
 
+bool Properties::isEmpty() const
+{
+	return properties->empty();
+}

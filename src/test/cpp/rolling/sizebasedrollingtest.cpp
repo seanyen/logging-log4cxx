@@ -18,6 +18,7 @@
 #include "../insertwide.h"
 #include "../logunit.h"
 #include <apr_time.h>
+#include <log4cxx/basicconfigurator.h>
 #include <log4cxx/logmanager.h>
 #include <log4cxx/xml/domconfigurator.h>
 #include <log4cxx/patternlayout.h>
@@ -35,7 +36,6 @@
 
 
 using namespace log4cxx;
-using namespace log4cxx::xml;
 using namespace log4cxx::filter;
 using namespace log4cxx::helpers;
 using namespace log4cxx::rolling;
@@ -56,6 +56,7 @@ LOGUNIT_CLASS(SizeBasedRollingTest)
 	LOGUNIT_TEST(test4);
 	LOGUNIT_TEST(test5);
 	LOGUNIT_TEST(test6);
+	LOGUNIT_TEST(testShortPatternRegression);
 	LOGUNIT_TEST_SUITE_END();
 
 	LoggerPtr root;
@@ -64,11 +65,10 @@ LOGUNIT_CLASS(SizeBasedRollingTest)
 public:
 	void setUp()
 	{
-		PatternLayoutPtr layout(new PatternLayout(LOG4CXX_STR("%d %level %c -%m%n")));
-		AppenderPtr ca(new ConsoleAppender(layout));
-		ca->setName(LOG4CXX_STR("CONSOLE"));
+		BasicConfigurator::configure(std::make_shared<PatternLayout> (
+			LOG4CXX_STR("%d %level %c -%m%n")
+		));
 		root = Logger::getRootLogger();
-		root->addAppender(ca);
 		logger = Logger::getLogger("org.apache.log4j.rolling.SizeBasedRollingTest");
 	}
 
@@ -119,20 +119,19 @@ public:
 		swrp->setMinIndex(0);
 
 		swrp->setFileNamePattern(LOG4CXX_STR("output/sizeBased-test1.%i"));
-		Pool p;
-		swrp->activateOptions(p);
+		swrp->activateOptions();
 
 		rfa->setRollingPolicy(swrp);
 		rfa->setTriggeringPolicy(sbtp);
-		rfa->activateOptions(p);
+		rfa->activateOptions();
 		root->addAppender(rfa);
 
 
 		common(logger, 0);
 
-		LOGUNIT_ASSERT_EQUAL(true, File("output/sizeBased-test1.0").exists(p));
-		LOGUNIT_ASSERT_EQUAL(true, File("output/sizeBased-test1.1").exists(p));
-		LOGUNIT_ASSERT_EQUAL(true, File("output/sizeBased-test1.2").exists(p));
+		LOGUNIT_ASSERT_EQUAL(true, File("output/sizeBased-test1.0").exists());
+		LOGUNIT_ASSERT_EQUAL(true, File("output/sizeBased-test1.1").exists());
+		LOGUNIT_ASSERT_EQUAL(true, File("output/sizeBased-test1.2").exists());
 		LOGUNIT_ASSERT_EQUAL(true, Compare::compare(File("output/sizeBased-test1.0"),
 				File("witness/rolling/sbr-test2.log")));
 		LOGUNIT_ASSERT_EQUAL(true, Compare::compare(File("output/sizeBased-test1.1"),
@@ -160,19 +159,18 @@ public:
 		swrp->setMinIndex(0);
 
 		swrp->setFileNamePattern(LOG4CXX_STR("output/sizeBased-test2.%i"));
-		Pool p;
-		swrp->activateOptions(p);
+		swrp->activateOptions();
 
 		rfa->setRollingPolicy(swrp);
 		rfa->setTriggeringPolicy(sbtp);
-		rfa->activateOptions(p);
+		rfa->activateOptions();
 		root->addAppender(rfa);
 
 		common(logger, 0);
 
-		LOGUNIT_ASSERT_EQUAL(true, File("output/sizeBased-test2.log").exists(p));
-		LOGUNIT_ASSERT_EQUAL(true, File("output/sizeBased-test2.0").exists(p));
-		LOGUNIT_ASSERT_EQUAL(true, File("output/sizeBased-test2.1").exists(p));
+		LOGUNIT_ASSERT_EQUAL(true, File("output/sizeBased-test2.log").exists());
+		LOGUNIT_ASSERT_EQUAL(true, File("output/sizeBased-test2.0").exists());
+		LOGUNIT_ASSERT_EQUAL(true, File("output/sizeBased-test2.1").exists());
 
 		LOGUNIT_ASSERT_EQUAL(true, Compare::compare(File("output/sizeBased-test2.log"),
 				File("witness/rolling/sbr-test2.log")));
@@ -199,22 +197,21 @@ public:
 		fwrp->setMinIndex(0);
 		rfa->setFile(LOG4CXX_STR("output/sbr-test3.log"));
 		fwrp->setFileNamePattern(LOG4CXX_STR("output/sbr-test3.%i.gz"));
-		Pool p;
-		fwrp->activateOptions(p);
+		fwrp->activateOptions();
 		rfa->setRollingPolicy(fwrp);
 		rfa->setTriggeringPolicy(sbtp);
-		rfa->activateOptions(p);
+		rfa->activateOptions();
 		root->addAppender(rfa);
 
 		common(logger, 100);
 
-		LOGUNIT_ASSERT_EQUAL(true, File("output/sbr-test3.log").exists(p));
-		LOGUNIT_ASSERT_EQUAL(true, File("output/sbr-test3.0.gz").exists(p));
-		LOGUNIT_ASSERT_EQUAL(true, File("output/sbr-test3.1.gz").exists(p));
+		LOGUNIT_ASSERT_EQUAL(true, File("output/sbr-test3.log").exists());
+		LOGUNIT_ASSERT_EQUAL(true, File("output/sbr-test3.0.gz").exists());
+		LOGUNIT_ASSERT_EQUAL(true, File("output/sbr-test3.1.gz").exists());
 
 		LOGUNIT_ASSERT_EQUAL(true, Compare::compare(File("output/sbr-test3.log"),  File("witness/rolling/sbr-test3.log")));
-		LOGUNIT_ASSERT_EQUAL(File("witness/rolling/sbr-test3.0.gz").length(p), File("output/sbr-test3.0.gz").length(p));
-		LOGUNIT_ASSERT_EQUAL(File("witness/rolling/sbr-test3.1.gz").length(p), File("output/sbr-test3.1.gz").length(p));
+		LOGUNIT_ASSERT_EQUAL(File("witness/rolling/sbr-test3.0.gz").length(), File("output/sbr-test3.0.gz").length());
+		LOGUNIT_ASSERT_EQUAL(File("witness/rolling/sbr-test3.1.gz").length(), File("output/sbr-test3.1.gz").length());
 	}
 
 	/**
@@ -231,7 +228,7 @@ public:
 
 		FixedWindowRollingPolicyPtr swrp = FixedWindowRollingPolicyPtr(new FixedWindowRollingPolicy());
 		SizeBasedTriggeringPolicyPtr sbtp = SizeBasedTriggeringPolicyPtr(new SizeBasedTriggeringPolicy());
-
+		swrp->setCreateIntermediateDirectories(false);
 		sbtp->setMaxFileSize(100);
 		swrp->setMinIndex(0);
 
@@ -239,17 +236,16 @@ public:
 		//   test4 directory should not exists.  Should cause all rollover attempts to fail.
 		//
 		swrp->setFileNamePattern(LOG4CXX_STR("output/test4/sizeBased-test4.%i"));
-		Pool p;
-		swrp->activateOptions(p);
+		swrp->activateOptions();
 
 		rfa->setRollingPolicy(swrp);
 		rfa->setTriggeringPolicy(sbtp);
-		rfa->activateOptions(p);
+		rfa->activateOptions();
 		root->addAppender(rfa);
 
 		common(logger, 0);
 
-		LOGUNIT_ASSERT_EQUAL(true, File("output/sizeBased-test4.log").exists(p));
+		LOGUNIT_ASSERT_EQUAL(true, File("output/sizeBased-test4.log").exists());
 
 		LOGUNIT_ASSERT_EQUAL(true, Compare::compare(File("output/sizeBased-test4.log"),
 				File("witness/rolling/sbr-test4.log")));
@@ -270,41 +266,40 @@ public:
 
 		FixedWindowRollingPolicyPtr swrp = FixedWindowRollingPolicyPtr(new FixedWindowRollingPolicy());
 		SizeBasedTriggeringPolicyPtr sbtp = SizeBasedTriggeringPolicyPtr(new SizeBasedTriggeringPolicy());
-
+		swrp->setCreateIntermediateDirectories(false);
 		sbtp->setMaxFileSize(100);
 		swrp->setMinIndex(0);
 
 		swrp->setFileNamePattern(LOG4CXX_STR("output/sizeBased-test5.%i"));
-		Pool p;
-		swrp->activateOptions(p);
+		swrp->activateOptions();
 
 		rfa->setRollingPolicy(swrp);
 		rfa->setTriggeringPolicy(sbtp);
-		rfa->activateOptions(p);
+		rfa->activateOptions();
 		root->addAppender(rfa);
 
 		//
 		//   put stray file about locked file
 		FileOutputStream os1(LOG4CXX_STR("output/sizeBased-test5.1"), false);
-		os1.close(p);
+		os1.close();
 
 
 		FileOutputStream os0(LOG4CXX_STR("output/sizeBased-test5.0"), false);
 
 		common(logger, 0);
 
-		os0.close(p);
+		os0.close();
 
-		if (File("output/sizeBased-test5.3").exists(p))
+		if (File("output/sizeBased-test5.3").exists())
 		{
 			//
 			//    looks like platform where open files can be renamed
 			//
-			LOGUNIT_ASSERT_EQUAL(true, File("output/sizeBased-test5.log").exists(p));
-			LOGUNIT_ASSERT_EQUAL(true, File("output/sizeBased-test5.0").exists(p));
-			LOGUNIT_ASSERT_EQUAL(true, File("output/sizeBased-test5.1").exists(p));
-			LOGUNIT_ASSERT_EQUAL(true, File("output/sizeBased-test5.2").exists(p));
-			LOGUNIT_ASSERT_EQUAL(true, File("output/sizeBased-test5.3").exists(p));
+			LOGUNIT_ASSERT_EQUAL(true, File("output/sizeBased-test5.log").exists());
+			LOGUNIT_ASSERT_EQUAL(true, File("output/sizeBased-test5.0").exists());
+			LOGUNIT_ASSERT_EQUAL(true, File("output/sizeBased-test5.1").exists());
+			LOGUNIT_ASSERT_EQUAL(true, File("output/sizeBased-test5.2").exists());
+			LOGUNIT_ASSERT_EQUAL(true, File("output/sizeBased-test5.3").exists());
 
 			LOGUNIT_ASSERT_EQUAL(true, Compare::compare(File("output/sizeBased-test5.log"),
 					File("witness/rolling/sbr-test2.log")));
@@ -321,9 +316,9 @@ public:
 			//    so initial log file should have all log content
 			//    open file should be unaffected
 			//    stray file should have only been moved one slot.
-			LOGUNIT_ASSERT_EQUAL(true, File("output/sizeBased-test5.log").exists(p));
-			LOGUNIT_ASSERT_EQUAL(true, File("output/sizeBased-test5.0").exists(p));
-			LOGUNIT_ASSERT_EQUAL(true, File("output/sizeBased-test5.2").exists(p));
+			LOGUNIT_ASSERT_EQUAL(true, File("output/sizeBased-test5.log").exists());
+			LOGUNIT_ASSERT_EQUAL(true, File("output/sizeBased-test5.0").exists());
+			LOGUNIT_ASSERT_EQUAL(true, File("output/sizeBased-test5.2").exists());
 
 			LOGUNIT_ASSERT_EQUAL(true, Compare::compare(File("output/sizeBased-test5.log"),
 					File("witness/rolling/sbr-test4.log")));
@@ -347,23 +342,66 @@ public:
 		fwrp->setMinIndex(0);
 		rfa->setFile(LOG4CXX_STR("output/sbr-test6.log"));
 		fwrp->setFileNamePattern(LOG4CXX_STR("output/sbr-test6.%i.zip"));
-		Pool p;
-		fwrp->activateOptions(p);
+		fwrp->activateOptions();
 		rfa->setRollingPolicy(fwrp);
 		rfa->setTriggeringPolicy(sbtp);
-		rfa->activateOptions(p);
+		rfa->activateOptions();
 		root->addAppender(rfa);
 
 		common(logger, 100);
 
-		LOGUNIT_ASSERT_EQUAL(true, File("output/sbr-test6.log").exists(p));
-		LOGUNIT_ASSERT_EQUAL(true, File("output/sbr-test6.0.zip").exists(p));
-		LOGUNIT_ASSERT_EQUAL(true, File("output/sbr-test6.1.zip").exists(p));
+		LOGUNIT_ASSERT_EQUAL(true, File("output/sbr-test6.log").exists());
+		LOGUNIT_ASSERT_EQUAL(true, File("output/sbr-test6.0.zip").exists());
+		LOGUNIT_ASSERT_EQUAL(true, File("output/sbr-test6.1.zip").exists());
 
 		LOGUNIT_ASSERT_EQUAL(true, Compare::compare(File("output/sbr-test6.log"),  File("witness/rolling/sbr-test3.log")));
 	}
 
-};
+	/**
+	 * Regression test for FixedWindowRollingPolicy::purge() underflow.
+	 * This test uses a very short fileNamePattern ("R%i" -> "R1") which would
+	 * trigger std::out_of_range in the original vulnerable code.
+	 */
+	void testShortPatternRegression()
+	{
+		LogString activeFile = LOG4CXX_STR("output/active.log");
+		LogString rolledFile = LOG4CXX_STR("R1");
+		File(activeFile).deleteFile();
+		File(rolledFile).deleteFile();
 
+		PatternLayoutPtr layout = PatternLayoutPtr(new PatternLayout(LOG4CXX_STR("%m\n")));
+		RollingFileAppenderPtr rfa = RollingFileAppenderPtr(new RollingFileAppender());
+		rfa->setAppend(false);
+		rfa->setLayout(layout);
+		rfa->setFile(activeFile);
+
+		FixedWindowRollingPolicyPtr swrp = FixedWindowRollingPolicyPtr(new FixedWindowRollingPolicy());
+		SizeBasedTriggeringPolicyPtr sbtp = SizeBasedTriggeringPolicyPtr(new SizeBasedTriggeringPolicy());
+
+		sbtp->setMaxFileSize(5); // Very small to trigger rollover
+		swrp->setMinIndex(1);
+		swrp->setFileNamePattern(LOG4CXX_STR("R%i"));
+		swrp->activateOptions();
+
+		rfa->setRollingPolicy(swrp);
+		rfa->setTriggeringPolicy(sbtp);
+		rfa->activateOptions();
+		root->addAppender(rfa);
+
+		// First log: goes to active.log, size becomes > 5
+		LOG4CXX_INFO(logger, LOG4CXX_STR("123456"));
+		// Second log: triggers rollover
+		LOG4CXX_INFO(logger, LOG4CXX_STR("next"));
+
+		// In the vulnerable code, rollover would fail due to std::out_of_range
+		// and the rolled file would not exist.
+		LOGUNIT_ASSERT(File(rolledFile).exists());
+
+		// Cleanup
+		File(activeFile).deleteFile();
+		File(rolledFile).deleteFile();
+	}
+
+};
 
 LOGUNIT_TEST_SUITE_REGISTRATION(SizeBasedRollingTest);

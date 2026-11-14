@@ -17,9 +17,12 @@
 
 #include <log4cxx/logstring.h>
 #include <log4cxx/helpers/writer.h>
+#include <log4cxx/helpers/loglog.h>
+#include <log4cxx/helpers/pool.h>
 #include <stdexcept>
 
-using namespace log4cxx::helpers;
+using namespace LOG4CXX_NS;
+using namespace LOG4CXX_NS::helpers;
 
 IMPLEMENT_LOG4CXX_OBJECT(Writer)
 
@@ -31,9 +34,6 @@ Writer::~Writer()
 {
 }
 
-#ifdef LOG4CXX_MULTI_PROCESS
-OutputStreamPtr Writer::getOutPutStreamPtr()
-{
-	throw std::logic_error("getOutPutStreamPtr must be implemented in the derived class that you are using");
-}
-#endif
+void Writer::close(Pool&) { close(); }
+void Writer::flush(Pool&) { flush(); }
+void Writer::write(const LogString& str, Pool&) { write(str); }

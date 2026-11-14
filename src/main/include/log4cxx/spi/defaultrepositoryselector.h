@@ -21,14 +21,14 @@
 #include <log4cxx/spi/repositoryselector.h>
 #include <log4cxx/helpers/object.h>
 #include <log4cxx/spi/loggerrepository.h>
+#include <memory>
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 namespace spi
 {
-class LOG4CXX_EXPORT DefaultRepositorySelector :
-	public virtual RepositorySelector,
-	public virtual helpers::Object
+class LOG4CXX_EXPORT DefaultRepositorySelector
+	: public RepositorySelector
 {
 	public:
 		DECLARE_ABSTRACT_LOG4CXX_OBJECT(DefaultRepositorySelector)
@@ -36,11 +36,12 @@ class LOG4CXX_EXPORT DefaultRepositorySelector :
 		LOG4CXX_CAST_ENTRY(RepositorySelector)
 		END_LOG4CXX_CAST_MAP()
 
-		DefaultRepositorySelector(const LoggerRepositoryPtr repository1);
-		virtual LoggerRepositoryPtr getLoggerRepository();
+		DefaultRepositorySelector(const LoggerRepositoryPtr& repository1);
+		~DefaultRepositorySelector();
+		LoggerRepositoryPtr getLoggerRepository() override;
 
 	private:
-		LoggerRepositoryPtr repository;
+		LOG4CXX_DECLARE_PRIVATE_MEMBER_PTR(DefaultRepositorySelectorPrivate, m_priv)
 };
 }  // namespace spi
 } // namespace log4cxx

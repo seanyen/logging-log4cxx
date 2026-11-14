@@ -14,9 +14,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#if defined(_MSC_VER)
-	#pragma warning ( disable: 4231 4251 4275 4786 )
-#endif
 
 #include "logunit.h"
 
@@ -209,23 +206,6 @@ void TestFixture::assertEquals(const std::wstring expected,
 	}
 }
 #endif
-#if LOG4CXX_LOGCHAR_IS_UNICHAR || LOG4CXX_UNICHAR_API || LOG4CXX_CFSTRING_API
-void TestFixture::assertEquals(const std::basic_string<log4cxx::UniChar> expected,
-	const std::basic_string<log4cxx::UniChar> actual,
-	const char* expectedExpr,
-	const char* actualExpr,
-	int lineno)
-{
-	if (expected != actual)
-	{
-		std::string exp, act;
-		transcode(exp, expected);
-		transcode(act, actual);
-		abts_str_equal(tc, exp.c_str(), act.c_str(), lineno);
-		throw TestException();
-	}
-}
-#endif
 
 
 void TestFixture::assertEquals(const int expected, const int actual, int lineno)
@@ -253,9 +233,9 @@ LogUnit::TestSuite::TestSuite(const char* fname) : filename(fname), disabled(fal
 #endif
 }
 
-void LogUnit::TestSuite::addTest(const char*, test_func func)
+void LogUnit::TestSuite::addTest(const char* test_name, test_func func)
 {
-	test_funcs.push_back(func);
+	test_funcs.push_back({test_name,func});
 }
 
 std::string LogUnit::TestSuite::getName() const
@@ -281,7 +261,7 @@ abts_suite* TestSuite::run(abts_suite* suite) const
 		iter != test_funcs.end();
 		iter++)
 	{
-		abts_run_test(suite, *iter, NULL);
+		abts_run_test(suite, iter->first, *iter->second, NULL);
 	}
 
 	return suite;

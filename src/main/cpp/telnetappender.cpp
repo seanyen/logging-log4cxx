@@ -19,19 +19,90 @@
 #include <log4cxx/helpers/loglog.h>
 #include <log4cxx/helpers/optionconverter.h>
 #include <log4cxx/helpers/stringhelper.h>
-#include <apr_thread_proc.h>
-#include <apr_atomic.h>
-#include <apr_strings.h>
+#include <log4cxx/helpers/serversocket.h>
 #include <log4cxx/helpers/charsetencoder.h>
 #include <log4cxx/helpers/bytebuffer.h>
 #include <log4cxx/helpers/threadutility.h>
+#include <log4cxx/private/appenderskeleton_priv.h>
 #include <mutex>
+#include <thread>
+#include <vector>
 
-using namespace log4cxx;
-using namespace log4cxx::helpers;
-using namespace log4cxx::net;
+#if LOG4CXX_EVENTS_AT_EXIT
+#include <log4cxx/private/atexitregistry.h>
+#endif
+
+using namespace LOG4CXX_NS;
+using namespace LOG4CXX_NS::helpers;
+using namespace LOG4CXX_NS::net;
+
+struct Connection
+{
+	helpers::SocketPtr s;
+	size_t sentCount;
+};
+LOG4CXX_LIST_DEF(ConnectionList, Connection);
 
 IMPLEMENT_LOG4CXX_OBJECT(TelnetAppender)
+
+struct TelnetAppender::TelnetAppenderPriv : public AppenderSkeletonPrivate
+{
+	TelnetAppenderPriv( int port, int maxConnections ) : AppenderSkeletonPrivate(),
+		port(port),
+		connections(maxConnections),
+		encoding(LOG4CXX_STR("UTF-8")),
+		encoder(CharsetEncoder::getUTF8Encoder()),
+		activeConnections(0)
+#if LOG4CXX_EVENTS_AT_EXIT
+		, atExitRegistryRaii([this]
+		{
+			if (setClosed())
+				stopAcceptingConnections();
+		})
+#endif
+	{ }
+
+	~TelnetAppenderPriv()
+	{ stopAcceptingConnections(); }
+
+	int port;
+	LogString hostname;
+	bool reuseAddress = false;
+	// Secure default: never let an unauthenticated peer that stops reading
+	// block the logging pipeline (see setNonBlocking for the opt-out).
+	bool nonBlocking = true;
+	ConnectionList connections;
+	LogString encoding;
+	LOG4CXX_NS::helpers::CharsetEncoderPtr encoder;
+	std::unique_ptr<helpers::ServerSocket> serverSocket;
+	std::thread sh;
+	size_t activeConnections;
+	size_t eventCount{ 0 };
+
+#if LOG4CXX_EVENTS_AT_EXIT
+	helpers::AtExitRegistry::Raii atExitRegistryRaii;
+#endif
+
+	void stopAcceptingConnections()
+	{
+		if (!this->serverSocket)
+			return;
+		// Interrupt accept()
+		try
+		{
+			this->serverSocket->close();
+		}
+		catch (const Exception&)
+		{
+		}
+		if (this->sh.joinable())
+			this->sh.join();
+	}
+
+	void shutdown() override;
+};
+
+#define _priv static_cast<TelnetAppenderPriv*>(m_priv.get())
 
 /** The default telnet server port */
 const int TelnetAppender::DEFAULT_PORT = 23;
@@ -40,29 +111,30 @@ const int TelnetAppender::DEFAULT_PORT = 23;
 const int TelnetAppender::MAX_CONNECTIONS = 20;
 
 TelnetAppender::TelnetAppender()
-	: port(DEFAULT_PORT), connections(MAX_CONNECTIONS),
-	  encoding(LOG4CXX_STR("UTF-8")),
-	  encoder(CharsetEncoder::getUTF8Encoder()),
-	  serverSocket(NULL), sh()
+	: AppenderSkeleton (std::make_unique<TelnetAppenderPriv>(DEFAULT_PORT, MAX_CONNECTIONS))
 {
-	activeConnections = 0;
 }
 
 TelnetAppender::~TelnetAppender()
 {
-	finalize();
-	delete serverSocket;
+	if (_priv->setClosed())
+		_priv->shutdown();
 }
 
-void TelnetAppender::activateOptions(Pool& /* p */)
+void TelnetAppender::activateOptions(  )
 {
-	if (serverSocket == NULL)
+	if (_priv->serverSocket == NULL)
 	{
-		serverSocket = new ServerSocket(port);
-		serverSocket->setSoTimeout(1000);
+		_priv->serverSocket = ServerSocket::create(_priv->port, _priv->reuseAddress, _priv->hostname);
+		_priv->serverSocket->setSoTimeout(1000);
 	}
 
-	sh = ThreadUtility::instance()->createThread( LOG4CXX_STR("TelnetAppender"), &TelnetAppender::acceptConnections, this );
+	if (!_priv->sh.joinable())
+		_priv->sh = ThreadUtility::instance()->createThread
+		( LOG4CXX_STR("Log4cxx.") + getName() + LOG4CXX_STR(".acceptor")
+		, &TelnetAppender::acceptConnections
+		, this
+		);
 }
 
 void TelnetAppender::setOption(const LogString& option,
@@ -72,9 +144,25 @@ void TelnetAppender::setOption(const LogString& option,
 	{
 		setPort(OptionConverter::toInt(value, DEFAULT_PORT));
 	}
+	else if (StringHelper::equalsIgnoreCase(option, LOG4CXX_STR("MAXCONNECTIONS"), LOG4CXX_STR("maxconnections")))
+	{
+		setMaxConnections(OptionConverter::toInt(value, MAX_CONNECTIONS));
+	}
 	else if (StringHelper::equalsIgnoreCase(option, LOG4CXX_STR("ENCODING"), LOG4CXX_STR("encoding")))
 	{
 		setEncoding(value);
+	}
+	else if (StringHelper::equalsIgnoreCase(option, LOG4CXX_STR("NONBLOCKING"), LOG4CXX_STR("nonblocking")))
+	{
+		setNonBlocking(OptionConverter::toBoolean(value, true));
+	}
+	else if (StringHelper::equalsIgnoreCase(option, LOG4CXX_STR("REUSEADDRESS"), LOG4CXX_STR("reuseaddress")))
+	{
+		setReuseAddress(OptionConverter::toBoolean(value, true));
+	}
+	else if (StringHelper::equalsIgnoreCase(option, LOG4CXX_STR("HOSTNAME"), LOG4CXX_STR("hostname")))
+	{
+		setHostname(value);
 	}
 	else
 	{
@@ -84,80 +172,78 @@ void TelnetAppender::setOption(const LogString& option,
 
 LogString TelnetAppender::getEncoding() const
 {
-	log4cxx::shared_lock<log4cxx::shared_mutex> lock(mutex);
-	return encoding;
+	std::lock_guard<std::recursive_mutex> lock(_priv->mutex);
+	return _priv->encoding;
 }
 
 void TelnetAppender::setEncoding(const LogString& value)
 {
-	std::unique_lock<log4cxx::shared_mutex> lock(mutex);
-	encoder = CharsetEncoder::getEncoder(value);
-	encoding = value;
+	std::lock_guard<std::recursive_mutex> lock(_priv->mutex);
+	_priv->encoder = CharsetEncoder::getEncoder(value);
+	_priv->encoding = value;
 }
 
-
-void TelnetAppender::close()
+void TelnetAppender::TelnetAppenderPriv::shutdown()
 {
-	std::unique_lock<log4cxx::shared_mutex> lock(mutex);
-
-	if (closed)
+	this->stopAcceptingConnections();
+	std::lock_guard<std::recursive_mutex> lock(this->mutex);
+	if (this->eventCount && helpers::LogLog::isDebugEnabled())
 	{
-		return;
+		LogString msg = LOG4CXX_STR("TelnetAppender eventCount ");
+		helpers::StringHelper::toString(this->eventCount, msg);
+		helpers::LogLog::debug(msg);
 	}
-
-	closed = true;
-
 	SocketPtr nullSocket;
-
-	for (ConnectionList::iterator iter = connections.begin();
-		iter != connections.end();
-		iter++)
+	int connectionNumber{ 0 };
+	for (auto& item : this->connections)
 	{
-		if (*iter != 0)
+		++connectionNumber;
+		if (item.s)
 		{
-			(*iter)->close();
-			*iter = nullSocket;
+			item.s->close();
+			if (this->eventCount && helpers::LogLog::isDebugEnabled())
+			{
+				LogString msg = LOG4CXX_STR("TelnetAppender connection ");
+				helpers::StringHelper::toString(connectionNumber, msg);
+				msg += LOG4CXX_STR(" sentCount ");
+				helpers::StringHelper::toString(item.sentCount, msg);
+				helpers::LogLog::debug(msg);
+			}
+			item = Connection{ nullSocket, 0 };
 		}
 	}
-
-	if (serverSocket != NULL)
-	{
-		try
-		{
-			serverSocket->close();
-		}
-		catch (Exception&)
-		{
-		}
-	}
-
-	if ( sh.joinable() )
-	{
-		sh.join();
-	}
-
-	activeConnections = 0;
+	this->activeConnections = 0;
 }
 
 
 void TelnetAppender::write(ByteBuffer& buf)
 {
-	for (ConnectionList::iterator iter = connections.begin();
-		iter != connections.end();
-		iter++)
+	int connectionNumber{ 0 };
+	for (auto& item :_priv->connections)
 	{
-		if (*iter != 0)
+		++connectionNumber;
+		if (item.s)
 		{
 			try
 			{
 				ByteBuffer b(buf.current(), buf.remaining());
-				(*iter)->write(b);
+				item.s->write(b);
+				++item.sentCount;
 			}
-			catch (Exception&)
+			catch (const Exception& e)
 			{
-				// The client has closed the connection, remove it from our list:
-				*iter = 0;
-				activeConnections--;
+				if (helpers::LogLog::isDebugEnabled())
+				{
+					LogString msg(LOG4CXX_STR("TelnetAppender connection "));
+					helpers::StringHelper::toString(connectionNumber, msg);
+					msg += LOG4CXX_STR(" sentCount ");
+					helpers::StringHelper::toString(item.sentCount, msg);
+					msg += LOG4CXX_STR("/");
+					helpers::StringHelper::toString(_priv->eventCount, msg);
+					helpers::LogLog::warn(msg, e);
+				}
+				item.s.reset();
+				_priv->activeConnections--;
 			}
 		}
 	}
@@ -165,7 +251,7 @@ void TelnetAppender::write(ByteBuffer& buf)
 
 void TelnetAppender::writeStatus(const SocketPtr& socket, const LogString& msg, Pool& p)
 {
-	size_t bytesSize = msg.size() * 2;
+	size_t bytesSize = msg.size() * 2 + 10;
 	char* bytes = p.pstralloc(bytesSize);
 
 	LogString::const_iterator msgIter(msg.begin());
@@ -173,47 +259,39 @@ void TelnetAppender::writeStatus(const SocketPtr& socket, const LogString& msg, 
 
 	while (msgIter != msg.end())
 	{
-		encoder->encode(msg, msgIter, buf);
+		CharsetEncoder::encode(_priv->encoder, msg, msgIter, buf);
 		buf.flip();
 		socket->write(buf);
 		buf.clear();
 	}
 }
 
-void TelnetAppender::append(const spi::LoggingEventPtr& event, Pool& p)
+void TelnetAppender::append( const spi::LoggingEventPtr& event )
 {
-	size_t count = activeConnections;
-
-	if (count > 0)
+	++_priv->eventCount;
+	if (0 < _priv->activeConnections)
 	{
+		helpers::Pool tempPool;
 		LogString msg;
-		this->layout->format(msg, event, pool);
+		if (_priv->layout)
+			_priv->layout->format(msg, event);
+		else
+			msg = event->getRenderedMessage();
 		msg.append(LOG4CXX_STR("\r\n"));
-		size_t bytesSize = msg.size() * 2;
-		char* bytes = p.pstralloc(bytesSize);
+		size_t bytesSize = msg.size() * 2 + 10;
+		char* bytes = tempPool.pstralloc(bytesSize);
 
 		LogString::const_iterator msgIter(msg.begin());
 		ByteBuffer buf(bytes, bytesSize);
 
-		log4cxx::shared_lock<log4cxx::shared_mutex> lock(mutex);
+		std::lock_guard<std::recursive_mutex> lock(_priv->mutex);
 
 		while (msgIter != msg.end())
 		{
-			log4cxx_status_t stat = encoder->encode(msg, msgIter, buf);
+			CharsetEncoder::encode(_priv->encoder, msg, msgIter, buf);
 			buf.flip();
 			write(buf);
 			buf.clear();
-
-			if (CharsetEncoder::isError(stat))
-			{
-				LogString unrepresented(1, 0x3F /* '?' */);
-				LogString::const_iterator unrepresentedIter(unrepresented.begin());
-				stat = encoder->encode(unrepresented, unrepresentedIter, buf);
-				buf.flip();
-				write(buf);
-				buf.clear();
-				msgIter++;
-			}
 		}
 	}
 }
@@ -226,8 +304,9 @@ void TelnetAppender::acceptConnections()
 	{
 		try
 		{
-			SocketPtr newClient = serverSocket->accept();
-			bool done = closed;
+			SocketPtr newClient = _priv->serverSocket->accept();
+			newClient->setNonBlocking(_priv->nonBlocking);
+			bool done = _priv->closed;
 
 			if (done)
 			{
@@ -238,9 +317,9 @@ void TelnetAppender::acceptConnections()
 				break;
 			}
 
-			size_t count = activeConnections;
+			size_t count = _priv->activeConnections;
 
-			if (count >= connections.size())
+			if (count >= _priv->connections.size())
 			{
 				Pool p;
 				writeStatus(newClient, LOG4CXX_STR("Too many connections.\r\n"), p);
@@ -251,16 +330,24 @@ void TelnetAppender::acceptConnections()
 				//
 				//   find unoccupied connection
 				//
-				std::unique_lock<log4cxx::shared_mutex> lock(mutex);
+				std::lock_guard<std::recursive_mutex> lock(_priv->mutex);
 
-				for (ConnectionList::iterator iter = connections.begin();
-					iter != connections.end();
-					iter++)
+				int connectionNumber{ 0 };
+				for (auto& item : _priv->connections)
 				{
-					if (*iter == NULL)
+					++connectionNumber;
+					if (!item.s)
 					{
-						*iter = newClient;
-						activeConnections++;
+						item = Connection{ newClient, 0 };
+						_priv->activeConnections++;
+						if (helpers::LogLog::isDebugEnabled())
+						{
+							LogString msg = LOG4CXX_STR("TelnetAppender new connection ");
+							helpers::StringHelper::toString(connectionNumber, msg);
+							msg += LOG4CXX_STR("/");
+							helpers::StringHelper::toString(_priv->activeConnections, msg);
+							helpers::LogLog::debug(msg);
+						}
 
 						break;
 					}
@@ -268,21 +355,21 @@ void TelnetAppender::acceptConnections()
 
 				Pool p;
 				LogString oss(LOG4CXX_STR("TelnetAppender v1.0 ("));
-				StringHelper::toString((int) count + 1, p, oss);
+				StringHelper::toString((int) count + 1, oss);
 				oss += LOG4CXX_STR(" active connections)\r\n\r\n");
 				writeStatus(newClient, oss, p);
 			}
 		}
-		catch (InterruptedIOException&)
+		catch (const InterruptedIOException&)
 		{
-			if (closed)
+			if (_priv->closed)
 			{
 				break;
 			}
 		}
-		catch (Exception& e)
+		catch (const Exception& e)
 		{
-			if (!closed)
+			if (!_priv->closed)
 			{
 				LogLog::error(LOG4CXX_STR("Encountered error while in SocketHandler loop."), e);
 			}
@@ -294,3 +381,63 @@ void TelnetAppender::acceptConnections()
 	}
 
 }
+
+int TelnetAppender::getPort() const
+{
+	return _priv->port;
+}
+
+void TelnetAppender::setPort(int port1)
+{
+	_priv->port = port1;
+}
+
+LogString TelnetAppender::getHostname() const
+{
+	return _priv->hostname;
+}
+
+void TelnetAppender::setHostname(const LogString& hostname)
+{
+	_priv->hostname = hostname;
+}
+
+int TelnetAppender::getMaxConnections() const
+{
+	return static_cast<int>(_priv->connections.size());
+}
+
+void TelnetAppender::setMaxConnections(int newValue)
+{
+	if (newValue < 0)
+	{
+		LogLog::warn(LOG4CXX_STR("TelnetAppender MaxConnections must be non-negative. Keeping the previous value."));
+		return;
+	}
+
+	std::lock_guard<std::recursive_mutex> lock(_priv->mutex);
+	const size_t newSize = static_cast<size_t>(newValue);
+	if (_priv->connections.size() < newSize)
+		_priv->connections.resize(newSize);
+	else while (newSize < _priv->connections.size())
+	{
+		auto item = _priv->connections.back();
+		_priv->connections.pop_back();
+		if (item.s)
+		{
+			item.s->close();
+			--_priv->activeConnections;
+		}
+	}
+}
+
+void TelnetAppender::setNonBlocking(bool newValue)
+{
+	_priv->nonBlocking = newValue;
+}
+
+void TelnetAppender::setReuseAddress(bool reuseAddress)
+{
+	_priv->reuseAddress = reuseAddress;
+}
+

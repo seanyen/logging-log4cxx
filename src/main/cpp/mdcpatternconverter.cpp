@@ -1,0 +1,104 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include <log4cxx/pattern/mdcpatternconverter.h>
+#include <log4cxx/private/patternconverter_priv.h>
+#include <log4cxx/spi/loggingevent.h>
+#include <log4cxx/jsonlayout.h>
+
+using namespace LOG4CXX_NS;
+using namespace LOG4CXX_NS::pattern;
+
+IMPLEMENT_LOG4CXX_OBJECT(MDCPatternConverter)
+
+MDCPatternConverter::MDCPatternConverter
+	( const LogString&              name
+	, const LogString&              style
+	, const std::vector<LogString>& options
+	)
+	: LoggingEventPatternConverter(std::make_unique<PatternConverter::PatternConverterPrivate>(name, style))
+{
+}
+
+PatternConverterPtr MDCPatternConverter::newInstance(
+	const std::vector<LogString>& options)
+{
+	if (options.empty())
+		return std::make_shared<MDCPatternConverter>();
+	return std::make_shared<MDCPatternConverter>(LogString(), options.front());
+}
+
+void MDCPatternConverter::format( const spi::LoggingEventPtr& event, LogString& toAppendTo ) const
+{
+	size_t startIndex = toAppendTo.size();
+	auto& info = getFormattingInfo();
+	if (m_priv->name.empty()) // Full MDC required?
+	{
+		const size_t separCount = 2;
+		const size_t quoteCount = 2;
+		LogString separ = LOG4CXX_STR("{");
+		size_t remainingLength = info.getMaxLength() > 0
+			? static_cast<size_t>(info.getMaxLength()) - 1
+			: 0;
+		for (auto key : event->getMDCKeySet())
+		{
+			LogString value;
+			event->getMDC(key, value);
+			auto itemLength = separCount + key.length() + quoteCount + value.length() + quoteCount;
+			if (remainingLength < itemLength)
+				break;
+			toAppendTo.append(separ);
+			JSONLayout::appendItem(key, toAppendTo);
+			toAppendTo.append(LOG4CXX_STR(":"));
+			JSONLayout::appendItem(value, toAppendTo);
+			separ = LOG4CXX_STR(",");
+			remainingLength -= itemLength;
+		}
+		if (LOG4CXX_STR(",") == separ)
+			toAppendTo.append(LOG4CXX_STR("}"));
+	}
+	else
+	{
+		LogString value;
+		event->getMDC(m_priv->name, value);
+		if (info.getMaxLength() < value.length())
+			toAppendTo.append(value.substr(value.length() - info.getMaxLength()));
+		else
+			toAppendTo.append(value);
+	}
+	if (!m_priv->style.empty()) // In a quoted context?
+	{
+		auto quote = m_priv->style.front();
+		if (toAppendTo.find(quote, startIndex) != toAppendTo.npos)
+		{
+			// Duplicate each quote character in a single linear pass:
+			// repeated single-character insert() shifts the tail of the
+			// output buffer on every quote, which is quadratic in the
+			// (attacker-controllable) MDC content length.
+			LogString input = toAppendTo.substr(startIndex);
+			toAppendTo.resize(startIndex);
+			size_t endIndex, index = 0;
+			while ((endIndex = input.find(quote, index)) != input.npos)
+			{
+				toAppendTo.append(input, index, endIndex - index + 1);
+				toAppendTo += quote;
+				index = endIndex + 1;
+			}
+			toAppendTo.append(input, index, LogString::npos);
+		}
+	}
+}

@@ -20,9 +20,11 @@
 #include <log4cxx/helpers/pool.h>
 #include <stdlib.h>
 #include <log4cxx/helpers/exception.h>
-#include <log4cxx/helpers/bytebuffer.h>
+#include <log4cxx/private/bytebuffer_priv.h>
 #include <log4cxx/helpers/charsetdecoder.h>
 #include <log4cxx/helpers/charsetencoder.h>
+#include <log4cxx/helpers/stringhelper.h>
+#include <log4cxx/helpers/loglog.h>
 #include <vector>
 #include <cstring>
 #if !defined(LOG4CXX)
@@ -30,13 +32,12 @@
 #endif
 #include <log4cxx/private/log4cxx_private.h>
 
-#if LOG4CXX_LOGCHAR_IS_UNICHAR || LOG4CXX_CFSTRING_API || LOG4CXX_UNICHAR_API
+#if LOG4CXX_CFSTRING_API
 	#include <CoreFoundation/CFString.h>
 #endif
 
-using namespace log4cxx;
-using namespace log4cxx::helpers;
-
+using namespace LOG4CXX_NS;
+using namespace LOG4CXX_NS::helpers;
 
 void Transcoder::decodeUTF8(const std::string& src, LogString& dst)
 {
@@ -44,17 +45,8 @@ void Transcoder::decodeUTF8(const std::string& src, LogString& dst)
 
 	while (iter != src.end())
 	{
-		unsigned int sv = decode(src, iter);
-
-		if (sv != 0xFFFF)
-		{
-			encode(sv, dst);
-		}
-		else
-		{
-			dst.append(1, LOSSCHAR);
-			iter++;
-		}
+		auto sv = getCodePoint(src, iter);
+		encode(sv, dst);
 	}
 }
 
@@ -67,247 +59,83 @@ void Transcoder::encodeUTF8(const LogString& src, std::string& dst)
 
 	while (iter != src.end())
 	{
-		unsigned int sv = decode(src, iter);
-
-		if (sv != 0xFFFF)
-		{
-			encode(sv, dst);
-		}
-		else
-		{
-			dst.append(1, LOSSCHAR);
-			iter++;
-		}
+		unsigned int sv = getCodePoint(src, iter);
+		encode(sv, dst);
 	}
 
-#endif
-}
-
-char* Transcoder::encodeUTF8(const LogString& src, Pool& p)
-{
-#if LOG4CXX_LOGCHAR_IS_UTF8
-	return p.pstrdup(src);
-#else
-	std::string tmp;
-	encodeUTF8(src, tmp);
-	return p.pstrdup(tmp);
 #endif
 }
 
 
 void Transcoder::encodeUTF8(unsigned int sv, ByteBuffer& dst)
 {
-	size_t bytes = encodeUTF8(sv, dst.current());
-	dst.position(dst.position() + bytes);
-}
-
-
-size_t Transcoder::encodeUTF8(unsigned int ch, char* dst)
-{
-	if (ch < 0x80)
-	{
-		dst[0] = (char) ch;
-		return 1;
-	}
-	else if (ch < 0x800)
-	{
-		dst[0] = (char) (0xC0 + (ch >> 6));
-		dst[1] = (char) (0x80 + (ch & 0x3F));
-		return 2;
-	}
-	else if (ch < 0x10000)
-	{
-		dst[0] = (char) (0xE0 + (ch >> 12));
-		dst[1] = (char) (0x80 + ((ch >> 6) & 0x3F));
-		dst[2] = (char) (0x80 + (ch & 0x3F));
-		return 3;
-	}
-	else if (ch <= 0x10FFFF)
-	{
-		dst[0] = (char) (0xF0 + (ch >> 18));
-		dst[1] = (char) (0x80 + ((ch >> 12) & 0x3F));
-		dst[2] = (char) (0x80 + ((ch >> 6) & 0x3F));
-		dst[3] = (char) (0x80 + (ch & 0x3F));
-		return 4;
-	}
-	else
-	{
-		//
-		//  output UTF-8 encoding of 0xFFFF
-		//
-		dst[0] = (char) 0xEF;
-		dst[1] = (char) 0xBF;
-		dst[2] = (char) 0xBF;
-		return 3;
-	}
+	dst.increment_position(CharsetEncoder::putUTF8CodePoint(sv, dst.current()));
 }
 
 void Transcoder::encodeUTF16BE(unsigned int sv, ByteBuffer& dst)
 {
-	size_t bytes = encodeUTF16BE(sv, dst.current());
-	dst.position(dst.position() + bytes);
-}
-
-
-size_t Transcoder::encodeUTF16BE(unsigned int ch, char* dst)
-{
-	if (ch <= 0xFFFF)
-	{
-		dst[0] = (char) (ch >> 8);
-		dst[1] = (char) (ch & 0xFF);
-		return 2;
-	}
-
-	if (ch <= 0x10FFFF)
-	{
-		unsigned char w = (unsigned char) ((ch >> 16) - 1);
-		dst[0] = (char) (0xD8 + (w >> 2));
-		dst[1] = (char) (((w & 0x03) << 6) + ((ch >> 10) & 0x3F));
-		dst[2] = (char) (0xDC + ((ch & 0x30) >> 4));
-		dst[3] = (char) (ch & 0xFF);
-		return 4;
-	}
-
-	dst[0] = dst[1] = (char) 0xFF;
-	return 2;
+	dst.increment_position(CharsetEncoder::putUTF16BECodePoint(sv, dst.current()));
 }
 
 void Transcoder::encodeUTF16LE(unsigned int sv, ByteBuffer& dst)
 {
-	size_t bytes = encodeUTF16LE(sv, dst.current());
-	dst.position(dst.position() + bytes);
+	dst.increment_position(CharsetEncoder::putUTF16LECodePoint(sv, dst.current()));
 }
-
-size_t Transcoder::encodeUTF16LE(unsigned int ch, char* dst)
-{
-	if (ch <= 0xFFFF)
-	{
-		dst[1] = (char) (ch >> 8);
-		dst[0] = (char) (ch & 0xFF);
-		return 2;
-	}
-
-	if (ch <= 0x10FFFF)
-	{
-		unsigned char w = (unsigned char) ((ch >> 16) - 1);
-		dst[1] = (char) (0xD8 + (w >> 2));
-		dst[0] = (char) (((w & 0x03) << 6) + ((ch >> 10) & 0x3F));
-		dst[3] = (char) (0xDC + ((ch & 0x30) >> 4));
-		dst[2] = (char) (ch & 0xFF);
-		return 4;
-	}
-
-	dst[0] = dst[1] = (char) 0xFF;
-	return 2;
-}
-
 
 unsigned int Transcoder::decode(const std::string& src,
 	std::string::const_iterator& iter)
 {
-	std::string::const_iterator start(iter);
-	unsigned char ch1 = *(iter++);
-
-	if (ch1 <= 0x7F)
-	{
-		return ch1;
-	}
-
-	//
-	//   should not have continuation character here
-	//
-	if ((ch1 & 0xC0) != 0x80 && iter != src.end())
-	{
-		unsigned char ch2 = *(iter++);
-
-		//
-		//   should be continuation
-		if ((ch2 & 0xC0) != 0x80)
-		{
-			iter = start;
-			return 0xFFFF;
-		}
-
-		if ((ch1 & 0xE0) == 0xC0)
-		{
-			if ((ch2 & 0xC0) == 0x80)
-			{
-				unsigned int rv = ((ch1 & 0x1F) << 6) + (ch2 & 0x3F);
-
-				if (rv >= 0x80)
-				{
-					return rv;
-				}
-			}
-
-			iter = start;
-			return 0xFFFF;
-		}
-
-		if (iter != src.end())
-		{
-			unsigned char ch3 = *(iter++);
-
-			//
-			//   should be continuation
-			//
-			if ((ch3 & 0xC0) != 0x80)
-			{
-				iter = start;
-				return 0xFFFF;
-			}
-
-			if ((ch1 & 0xF0) == 0xE0)
-			{
-				unsigned rv = ((ch1 & 0x0F) << 12)
-					+ ((ch2 & 0x3F) << 6)
-					+ (ch3 & 0x3F);
-
-				if (rv <= 0x800)
-				{
-					iter = start;
-					return 0xFFFF;
-				}
-
-				return rv;
-			}
-
-			if (iter != src.end())
-			{
-				unsigned char ch4 = *(iter++);
-
-				if ((ch4 & 0xC0) != 0x80)
-				{
-					iter = start;
-					return 0xFFFF;
-				}
-
-				unsigned int rv = ((ch1 & 0x07) << 18)
-					+ ((ch2 & 0x3F) << 12)
-					+ ((ch3 & 0x3F) << 6)
-					+ (ch4 & 0x3F);
-
-				if (rv > 0xFFFF)
-				{
-					return rv;
-				}
-
-			}
-		}
-	}
-
-	iter = start;
-	return 0xFFFF;
+	auto offset = iter - src.begin();
+	auto remaining = src.size() - offset;
+	ByteBufferPriv buf(const_cast<char*>(src.data() + offset), remaining);
+	auto result = CharsetDecoder::getUTF8CodePoint(buf);
+	iter += remaining - buf.remaining();
+	return result;
 }
 
+	template <typename T>
+unsigned int decodeCodePoint(const typename std::basic_string<T>& str, typename std::basic_string<T>::const_iterator& nextCodePoint)
+{
+	auto lastCodePoint = nextCodePoint;
+	auto ch = Transcoder::decode(str, nextCodePoint);
+	if (nextCodePoint == lastCodePoint) // failed to decode input?
+	{
+		// Skip the undecodable run and keep escaping the remaining input
+		// instead of discarding it; the run collapses to one replacement.
+		for (++nextCodePoint; nextCodePoint != str.end(); ++nextCodePoint)
+		{
+			auto probe = nextCodePoint;
+			Transcoder::decode(str, probe);
+			if (probe != nextCodePoint) // next unit starts a decodable sequence
+				break;
+		}
+		ch = 0xFFFD; // The Unicode replacement character
+	}
+	else if ( (0xD800 <= ch && ch <= 0xDFFF) // UTF-16 surrogate-range
+			|| 0xFFFF == ch || 0x10FFFF < ch)
+	{
+		ch = 0xFFFD; // The Unicode replacement character
+	}
+	return ch;
+}
+
+unsigned int Transcoder::getCodePoint(const std::string& str, std::string::const_iterator& nextCodePoint)
+{
+	return decodeCodePoint<char>(str, nextCodePoint);
+}
 
 void Transcoder::encode(unsigned int sv, std::string& dst)
 {
 	char tmp[8];
-	size_t bytes = encodeUTF8(sv, tmp);
+	size_t bytes = CharsetEncoder::putUTF8CodePoint(sv, tmp);
 	dst.append(tmp, bytes);
 }
 
+/// Does \c str contain the Unicode replacement character
+bool Transcoder::hasReplacementCharacter(const std::string& str)
+{
+	return str.npos != str.find("\xEF\xBF\xBD");
+}
 
 void Transcoder::decode(const std::string& src, LogString& dst)
 {
@@ -339,25 +167,14 @@ void Transcoder::decode(const std::string& src, LogString& dst)
 
 			if (CharsetDecoder::isError(stat))
 			{
-				dst.append(1, LOSSCHAR);
-				buf.position(buf.position() + 1);
+				encode(LOSSCHAR, dst);
+				buf.increment_position(1);
 			}
 		}
 
 		decoder->decode(buf, dst);
 	}
 
-#endif
-}
-
-char* Transcoder::encode(const LogString& src, Pool& p)
-{
-#if LOG4CXX_CHARSET_UTF8 && LOG4CXX_LOGCHAR_IS_UTF8
-	return p.pstrdup(src);
-#else
-	std::string tmp;
-	encode(src, tmp);
-	return p.pstrdup(tmp);
 #endif
 }
 
@@ -377,13 +194,13 @@ void Transcoder::encode(const LogString& src, std::string& dst)
 		iter != src.end() && ((unsigned int) *iter) < 0x80;
 		iter++)
 	{
-		dst.append(1, *iter);
+		dst.append(1, static_cast<char>(*iter));
 	}
 
 #endif
-
 	if (iter != src.end())
 	{
+		static const int BUFSIZE = 256;
 		char buf[BUFSIZE];
 		ByteBuffer out(buf, BUFSIZE);
 
@@ -396,7 +213,7 @@ void Transcoder::encode(const LogString& src, std::string& dst)
 
 			if (CharsetEncoder::isError(stat))
 			{
-				dst.append(1, LOSSCHAR);
+				encode(LOSSCHAR, dst);
 				iter++;
 			}
 		}
@@ -476,27 +293,18 @@ static void encodeUTF16(unsigned int sv, String& dst)
 
 
 
-#if LOG4CXX_WCHAR_T_API || LOG4CXX_LOGCHAR_IS_WCHAR_T || defined(WIN32) || defined(_WIN32)
+#if LOG4CXX_WCHAR_T_API || LOG4CXX_LOGCHAR_IS_WCHAR || defined(WIN32) || defined(_WIN32)
 void Transcoder::decode(const std::wstring& src, LogString& dst)
 {
-#if LOG4CXX_LOGCHAR_IS_WCHAR_T
-	dst.append(src, len);
+#if LOG4CXX_LOGCHAR_IS_WCHAR
+	dst.append(src);
 #else
 	std::wstring::const_iterator i = src.begin();
 
 	while (i != src.end())
 	{
-		unsigned int cp = decode(src, i);
-
-		if (cp != 0xFFFF)
-		{
-			encode(cp, dst);
-		}
-		else
-		{
-			dst.append(1, LOSSCHAR);
-			i++;
-		}
+		auto cp = getCodePoint(src, i);
+		encode(cp, dst);
 	}
 
 #endif
@@ -504,40 +312,17 @@ void Transcoder::decode(const std::wstring& src, LogString& dst)
 
 void Transcoder::encode(const LogString& src, std::wstring& dst)
 {
-#if LOG4CXX_LOGCHAR_IS_WCHAR_T
+#if LOG4CXX_LOGCHAR_IS_WCHAR
 	dst.append(src);
 #else
 
 	for (LogString::const_iterator i = src.begin(); i != src.end();)
 	{
-		unsigned int cp = Transcoder::decode(src, i);
-
-		if (cp != 0xFFFF)
-		{
-			encode(cp, dst);
-		}
-		else
-		{
-			dst.append(1, LOSSCHAR);
-			i++;
-		}
+		unsigned int cp = getCodePoint(src, i);
+		encode(cp, dst);
 	}
 
 #endif
-}
-
-wchar_t* Transcoder::wencode(const LogString& src, Pool& p)
-{
-#if LOG4CXX_LOGCHAR_IS_WCHAR_T
-	std::wstring& tmp = src;
-#else
-	std::wstring tmp;
-	encode(src, tmp);
-#endif
-	wchar_t* dst = (wchar_t*) p.palloc((tmp.length() + 1) * sizeof(wchar_t));
-	dst[tmp.length()] = 0;
-	std::memcpy(dst, tmp.data(), tmp.length() * sizeof(wchar_t));
-	return dst;
 }
 
 
@@ -551,6 +336,10 @@ unsigned int Transcoder::decode(const std::wstring& in,
 #endif
 }
 
+unsigned int Transcoder::getCodePoint(const std::wstring& str, std::wstring::const_iterator& nextCodePoint)
+{
+	return decodeCodePoint<wchar_t>(str, nextCodePoint);
+}
 
 void Transcoder::encode(unsigned int sv, std::wstring& dst)
 {
@@ -570,88 +359,59 @@ void Transcoder::encode(unsigned int sv, std::wstring& dst)
 #endif
 }
 
-#endif
-
-
-
-#if LOG4CXX_UNICHAR_API || LOG4CXX_CFSTRING_API
-void Transcoder::decode(const std::basic_string<UniChar>& src, LogString& dst)
+/// Does \c str contain the Unicode replacement character
+bool Transcoder::hasReplacementCharacter(const std::wstring& str)
 {
-#if LOG4CXX_LOGCHAR_IS_UNICHAR
-	dst.append(src);
-#else
-
-	for (std::basic_string<UniChar>::const_iterator i = src.begin();
-		i != src.end();)
-	{
-		unsigned int cp = decode(src, i);
-		encode(cp, dst);
-	}
-
-#endif
+	return str.npos != str.find(LOSSCHAR);
 }
-
-void Transcoder::encode(const LogString& src, std::basic_string<UniChar>& dst)
-{
-#if LOG4CXX_LOGCHAR_IS_UNICHAR
-	dst.append(src);
-#else
-
-	for (LogString::const_iterator i = src.begin();
-		i != src.end();)
-	{
-		unsigned int cp = decode(src, i);
-		encode(cp, dst);
-	}
-
-#endif
-}
-
-unsigned int Transcoder::decode(const std::basic_string<UniChar>& in,
-	std::basic_string<UniChar>::const_iterator& iter)
-{
-	return decodeUTF16(in, iter);
-}
-
-void Transcoder::encode(unsigned int sv, std::basic_string<UniChar>& dst)
-{
-	encodeUTF16(sv, dst);
-}
-
 #endif
 
 #if LOG4CXX_CFSTRING_API
 void Transcoder::decode(const CFStringRef& src, LogString& dst)
 {
-	const UniChar* chars = CFStringGetCharactersPtr(src);
-
-	if (chars)
+	auto length = CFStringGetLength(src);
+#if defined(_DEBUG)
+	if (LogLog::isDebugEnabled())
 	{
-		decode(chars, dst);
+		LogString msg(LOG4CXX_STR("Transcoder::decodeCFString"));
+		msg += LOG4CXX_STR(" length ");
+		StringHelper::toString((size_t)length, msg);
+		LogLog::debug(msg);
 	}
-	else
-	{
-		size_t length = CFStringGetLength(src);
-
-		if (length > 0)
-		{
-			std::vector<UniChar> tmp(length);
-			CFStringGetCharacters(src, CFRangeMake(0, length), &tmp[0]);
-#if LOG4CXX_LOGCHAR_IS_UNICHAR
-			dst.append(&tmp[0], tmp.size());
-#else
-			decode(std::basic_string<UniChar>(&tmp[0], tmp.size()), dst);
 #endif
+
+	if (length > 0)
+	{
+		std::vector<unsigned short> tmp(length);
+		CFStringGetCharacters(src, CFRangeMake(0, length), &tmp[0]);
+		for (auto i = tmp.begin(); i != tmp.end(); )
+		{
+			auto start = i;
+			unsigned int cp = decodeUTF16(tmp, i);
+			if (cp != 0xFFFF)
+			{
+				encode(cp, dst);
+			}
+			else
+			{
+				encode(LOSSCHAR, dst);
+				if (i == start)
+				{
+					i++;
+				}
+			}
 		}
 	}
 }
 
 CFStringRef Transcoder::encode(const LogString& src)
 {
-	LOG4CXX_ENCODE_UNICHAR(tmp, src);
+	std::basic_string<unsigned short> tmp;
+	for (auto ch : src)
+		encodeUTF16(ch, tmp);
 	return CFStringCreateWithCharacters(kCFAllocatorDefault, tmp.data(), tmp.size());
 }
-#endif
+#endif // #if LOG4CXX_CFSTRING_API
 
 
 logchar Transcoder::decode(char val)
@@ -688,17 +448,15 @@ std::string Transcoder::encodeCharsetName(const LogString& val)
 		};
 	std::string out;
 
-	for (LogString::const_iterator iter = val.begin();
-		iter != val.end();
-		iter++)
+	for (auto& item : val)
 	{
-		if (*iter >= 0x20 && *iter < 0x7F)
+		if (item >= 0x20 && item < 0x7F)
 		{
-			out.append(1, asciiTable[*iter - 0x20]);
+			out.append(1, asciiTable[item - 0x20]);
 		}
 		else
 		{
-			out.append(1, LOSSCHAR);
+			out.append(1, '?');
 		}
 	}
 

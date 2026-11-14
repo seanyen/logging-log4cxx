@@ -20,7 +20,7 @@
 
 #include <log4cxx/helpers/dateformat.h>
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 namespace helpers
 {
@@ -33,9 +33,9 @@ class LOG4CXX_EXPORT RelativeTimeDateFormat : public DateFormat
 {
 	public:
 		RelativeTimeDateFormat();
-		virtual void format(LogString& s,
-			log4cxx_time_t tm,
-			log4cxx::helpers::Pool& p) const;
+
+		using DateFormat::format;
+		void format( LogString& toAppendTo, log4cxx_time_t tm ) const override;
 
 	private:
 		log4cxx_time_t startTime;

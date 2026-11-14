@@ -20,7 +20,7 @@
 
 #include <log4cxx/pattern/loggingeventpatternconverter.h>
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 namespace pattern
 {
@@ -35,12 +35,6 @@ namespace pattern
 class LOG4CXX_EXPORT LineSeparatorPatternConverter
 	: public LoggingEventPatternConverter
 {
-
-		/**
-		 * Private constructor.
-		 */
-		LineSeparatorPatternConverter();
-
 	public:
 		DECLARE_LOG4CXX_PATTERN(LineSeparatorPatternConverter)
 		BEGIN_LOG4CXX_CAST_MAP()
@@ -48,6 +42,7 @@ class LOG4CXX_EXPORT LineSeparatorPatternConverter
 		LOG4CXX_CAST_ENTRY_CHAIN(LoggingEventPatternConverter)
 		END_LOG4CXX_CAST_MAP()
 
+		LineSeparatorPatternConverter();
 
 		/**
 		 * Obtains an instance of pattern converter.
@@ -59,13 +54,9 @@ class LOG4CXX_EXPORT LineSeparatorPatternConverter
 
 		using LoggingEventPatternConverter::format;
 
-		void format(const log4cxx::spi::LoggingEventPtr& event,
-			LogString& toAppendTo,
-			log4cxx::helpers::Pool& p) const;
+		void format( const spi::LoggingEventPtr& event, LogString& toAppendTo ) const override;
 
-		void format(const log4cxx::helpers::ObjectPtr& obj,
-			LogString& toAppendTo,
-			log4cxx::helpers::Pool& p) const;
+		void format( const helpers::ObjectPtr& obj, LogString& toAppendTo ) const override;
 };
 
 }

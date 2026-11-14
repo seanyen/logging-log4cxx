@@ -18,12 +18,6 @@
 #if !defined(_LOG4CXX_ROLLING_ROLLING_POLICY_BASE_H)
 #define _LOG4CXX_ROLLING_ROLLING_POLICY_BASE_H
 
-#if defined(_MSC_VER)
-	#pragma warning ( push )
-	#pragma warning ( disable: 4231 4251 4275 4786 )
-#endif
-
-
 #include <log4cxx/helpers/object.h>
 #include <log4cxx/logger.h>
 #include <log4cxx/logmanager.h>
@@ -32,12 +26,11 @@
 #include <log4cxx/pattern/formattinginfo.h>
 #include <log4cxx/pattern/patternparser.h>
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 namespace rolling
 {
-LOG4CXX_LIST_DEF(PatternConverterList, log4cxx::pattern::PatternConverterPtr);
-LOG4CXX_LIST_DEF(FormattingInfoList, log4cxx::pattern::FormattingInfoPtr);
+LOG4CXX_LIST_DEF(PatternConverterList, LOG4CXX_NS::pattern::PatternConverterPtr);
 
 /**
  * Implements methods common to most, it not all, rolling
@@ -46,9 +39,8 @@ LOG4CXX_LIST_DEF(FormattingInfoList, log4cxx::pattern::FormattingInfoPtr);
  *
  *
  */
-class LOG4CXX_EXPORT RollingPolicyBase :
-	public virtual RollingPolicy,
-	public virtual helpers::Object
+class LOG4CXX_EXPORT RollingPolicyBase
+	: public RollingPolicy
 {
 	protected:
 		DECLARE_ABSTRACT_LOG4CXX_OBJECT(RollingPolicyBase)
@@ -57,32 +49,39 @@ class LOG4CXX_EXPORT RollingPolicyBase :
 		LOG4CXX_CAST_ENTRY(spi::OptionHandler)
 		END_LOG4CXX_CAST_MAP()
 
-
-	private:
-		/**
-		 * File name pattern converters.
-		 */
-		PatternConverterList patternConverters;
-
-		/**
-		 * File name field specifiers.
-		 */
-		FormattingInfoList patternFields;
-
-		/**
-		 * File name pattern.
-		 */
-		LogString fileNamePatternStr;
-
+		LOG4CXX_DECLARE_PRIVATE_MEMBER_PTR(RollingPolicyBasePrivate, m_priv)
 
 	public:
 		RollingPolicyBase();
 		virtual ~RollingPolicyBase();
-		virtual void activateOptions(log4cxx::helpers::Pool& p) = 0;
-		virtual log4cxx::pattern::PatternMap getFormatSpecifiers() const = 0;
 
-		virtual void setOption(const LogString& option,
-			const LogString& value);
+		using spi::OptionHandler::activateOptions;
+		/**
+		\copybrief spi::OptionHandler::activateOptions()
+
+		Converts the file name pattern to a collection of formaters.
+		*/
+		void activateOptions(   ) override;
+
+		/**
+		A map from a name to the object implementing the (date or index) formatting.
+		*/
+		virtual pattern::PatternMap getFormatSpecifiers() const = 0;
+
+
+		/**
+		\copybrief spi::OptionHandler::setOption()
+
+		Supported options | Supported values | Default value |
+		:-------------- | :----------------: | :---------------: |
+		FileNamePattern | (\ref legalChars "^") | - |
+		CreateIntermediateDirectories | True,False | False |
+
+		\anchor legalChars (^) Legal file name characters plus any conversion specifier supported by the concrete class.
+
+		\sa getFormatSpecifiers()
+		*/
+		void setOption(const LogString& option, const LogString& value) override;
 
 		/**
 		 * Set file name pattern.
@@ -96,14 +95,13 @@ class LOG4CXX_EXPORT RollingPolicyBase :
 		 */
 		LogString getFileNamePattern() const;
 
+		bool getCreateIntermediateDirectories() const;
+		void setCreateIntermediateDirectories(bool createIntermediate);
 
-#ifdef LOG4CXX_MULTI_PROCESS
-		PatternConverterList getPatternConverterList()
-		{
-			return patternConverters;
-		}
-#endif
+		PatternConverterList getPatternConverterList() const;
+
 	protected:
+		RollingPolicyBase(LOG4CXX_PRIVATE_PTR(RollingPolicyBasePrivate) priv);
 		/**
 		 *   Parse file name pattern.
 		 */
@@ -114,22 +112,17 @@ class LOG4CXX_EXPORT RollingPolicyBase :
 		 *
 		 * @param obj object to be evaluted in formatting, may not be null.
 		 * @param buf string buffer to which formatted file name is appended, may not be null.
-		 * @param p memory pool.
 		 */
-		void formatFileName(log4cxx::helpers::ObjectPtr& obj,
-			LogString& buf, log4cxx::helpers::Pool& p) const;
+		void formatFileName(const helpers::ObjectPtr& obj, LogString& buf) const;
 
-		log4cxx::pattern::PatternConverterPtr getIntegerPatternConverter() const;
-		log4cxx::pattern::PatternConverterPtr getDatePatternConverter() const;
-
+		LOG4CXX_NS::pattern::PatternConverterPtr getIntegerPatternConverter() const;
+		LOG4CXX_NS::pattern::PatternConverterPtr getDatePatternConverter() const;
 
 };
+
+LOG4CXX_PTR_DEF(RollingPolicyBase);
+
 }
 }
-
-
-#if defined(_MSC_VER)
-	#pragma warning ( pop )
-#endif
 
 #endif

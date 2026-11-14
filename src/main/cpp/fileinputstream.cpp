@@ -19,72 +19,75 @@
 #include <log4cxx/helpers/fileinputstream.h>
 #include <log4cxx/helpers/exception.h>
 #include <log4cxx/helpers/bytebuffer.h>
+#include <log4cxx/helpers/pool.h>
 #include <apr_file_io.h>
-#include <log4cxx/helpers/transcoder.h>
-#if !defined(LOG4CXX)
-	#define LOG4CXX 1
-#endif
-#include <log4cxx/helpers/aprinitializer.h>
 
-using namespace log4cxx;
-using namespace log4cxx::helpers;
+using namespace LOG4CXX_NS;
+using namespace LOG4CXX_NS::helpers;
+
+struct FileInputStream::FileInputStreamPrivate
+{
+	FileInputStreamPrivate(const File& aFile)
+		: path(aFile)
+		{}
+
+	File path;
+	Pool pool;
+	apr_file_t* fileptr{ nullptr };
+	void open();
+};
 
 IMPLEMENT_LOG4CXX_OBJECT(FileInputStream)
 
-FileInputStream::FileInputStream(const LogString& filename) : fileptr(0)
+FileInputStream::FileInputStream(const LogString& filename) :
+	m_priv(std::make_unique<FileInputStreamPrivate>(filename))
 {
-	open(filename);
+	m_priv->open();
 }
 
-FileInputStream::FileInputStream(const logchar* filename) : fileptr(0)
+FileInputStream::FileInputStream(const logchar* filename) :
+	m_priv(std::make_unique<FileInputStreamPrivate>(filename))
 {
-	LogString fn(filename);
-	open(fn);
+	m_priv->open();
 }
 
 
-void FileInputStream::open(const LogString& filename)
+void FileInputStream::FileInputStreamPrivate::open()
 {
 	apr_fileperms_t perm = APR_OS_DEFAULT;
 	apr_int32_t flags = APR_READ;
-	apr_status_t stat = File().setPath(filename).open(&fileptr, flags, perm, pool);
+	apr_status_t stat = apr_file_open(&this->fileptr, this->path.getAPRPath(), flags, perm, this->pool.getAPRPool());
 
 	if (stat != APR_SUCCESS)
 	{
-		throw IOException(stat);
+		throw IOException(this->path.getAPRPath(), stat);
 	}
 }
 
 
-FileInputStream::FileInputStream(const File& aFile)
+FileInputStream::FileInputStream(const File& aFile) :
+	m_priv(std::make_unique<FileInputStreamPrivate>(aFile))
 {
-	apr_fileperms_t perm = APR_OS_DEFAULT;
-	apr_int32_t flags = APR_READ;
-	apr_status_t stat = aFile.open(&fileptr, flags, perm, pool);
-
-	if (stat != APR_SUCCESS)
-	{
-		throw IOException(stat);
-	}
+	m_priv->open();
 }
 
 
 FileInputStream::~FileInputStream()
 {
-	if (fileptr != NULL && !APRInitializer::isDestructed)
+	if (m_priv->fileptr)
 	{
-		apr_file_close(fileptr);
+		apr_file_close(m_priv->fileptr);
 	}
 }
 
 
 void FileInputStream::close()
 {
-	apr_status_t stat = apr_file_close(fileptr);
+	apr_status_t stat = apr_file_close(m_priv->fileptr);
 
 	if (stat == APR_SUCCESS)
 	{
-		fileptr = NULL;
+		m_priv->fileptr = NULL;
 	}
 	else
 	{
@@ -96,7 +99,7 @@ void FileInputStream::close()
 int FileInputStream::read(ByteBuffer& buf)
 {
 	apr_size_t bytesRead = buf.remaining();
-	apr_status_t stat = apr_file_read(fileptr, buf.current(), &bytesRead);
+	apr_status_t stat = apr_file_read(m_priv->fileptr, buf.current(), &bytesRead);
 	int retval = -1;
 
 	if (!APR_STATUS_IS_EOF(stat))
@@ -106,7 +109,7 @@ int FileInputStream::read(ByteBuffer& buf)
 			throw IOException(stat);
 		}
 
-		buf.position(buf.position() + bytesRead);
+		buf.increment_position(bytesRead);
 		retval = (int)bytesRead;
 	}
 

@@ -20,13 +20,13 @@
 
 #include <log4cxx/helpers/writer.h>
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 namespace helpers
 {
 
 /**
-*   Abstract class for writing to character streams.
+*   Sends output to <code>stdout</code>.
 */
 class LOG4CXX_EXPORT SystemOutWriter : public Writer
 {
@@ -40,16 +40,16 @@ class LOG4CXX_EXPORT SystemOutWriter : public Writer
 		SystemOutWriter();
 		~SystemOutWriter();
 
-		virtual void close(Pool& p);
-		virtual void flush(Pool& p);
-		virtual void write(const LogString& str, Pool& p);
+		using Writer::close;
+		void close(  ) override;
+		using Writer::flush;
+		void flush(  ) override;
+		using Writer::write;
+		void write( const LogString& str ) override;
 
-		static void write(const LogString& str);
-		static void flush();
 	private:
 		SystemOutWriter(const SystemOutWriter&);
 		SystemOutWriter& operator=(const SystemOutWriter&);
-		static bool isWide();
 };
 
 } // namespace helpers

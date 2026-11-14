@@ -18,12 +18,14 @@
 #include <log4cxx/pattern/nameabbreviator.h>
 #include <log4cxx/helpers/exception.h>
 #include <log4cxx/helpers/stringhelper.h>
+#include <log4cxx/helpers/loglog.h>
 #include <vector>
 #include <limits.h>
+#include <stdexcept>
 
-using namespace log4cxx;
-using namespace log4cxx::pattern;
-using namespace log4cxx::helpers;
+using namespace LOG4CXX_NS;
+using namespace LOG4CXX_NS::pattern;
+using namespace LOG4CXX_NS::helpers;
 
 IMPLEMENT_LOG4CXX_OBJECT(NameAbbreviator)
 
@@ -35,7 +37,7 @@ NameAbbreviator::~NameAbbreviator()
 {
 }
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 namespace pattern
 {
@@ -61,7 +63,7 @@ class NOPAbbreviator : public NameAbbreviator
 		/**
 		 * {@inheritDoc}
 		 */
-		void abbreviate(LogString::size_type /* nameStart */, LogString& /* buf */) const
+		void abbreviate(LogString::size_type /* nameStart */, LogString& /* buf */) const override
 		{
 		}
 };
@@ -87,33 +89,27 @@ class MaxElementAbbreviator : public NameAbbreviator
 		 * Create new instance.
 		 * @param count maximum number of path elements to output.
 		 */
-		MaxElementAbbreviator(const int count1) : count(count1)
+		MaxElementAbbreviator(const int count1) : count(count1 < 1 ? 1 : count1)
 		{
 		}
 
 		/**
-		 * Abbreviate name.
-		 * @param buf buffer to append abbreviation.
-		 * @param nameStart start of name to abbreviate.
+		 * {@inheritDoc}
 		 */
-		void abbreviate(LogString::size_type nameStart, LogString& buf) const
+		void abbreviate(LogString::size_type nameStart, LogString& buf) const override
 		{
-			// We substract 1 from 'len' when assigning to 'end' to avoid out of
-			// bounds exception in return r.substring(end+1, len). This can happen if
-			// precision is 1 and the logger name ends with a dot.
-			LogString::size_type end = buf.length() - 1;
-
-			for (LogString::size_type i = count; i > 0; i--)
+			logchar separ = 0x2E; // '.'
+			LogString::size_type end = buf.length();
+			for (LogString::size_type i = count; nameStart < end && 0 < i; --i)
 			{
-				end = buf.rfind(0x2E /* '.' */, end - 1);
-
-				if ((end == LogString::npos) || (end < nameStart))
+				end = buf.rfind(separ, end - 1);
+				if (LogString::npos == end)
 				{
 					return;
 				}
 			}
-
-			buf.erase(buf.begin() + nameStart, buf.begin() + (end + 1));
+			if (nameStart < end + 1 && end + 1 < buf.length())
+				buf.erase(buf.begin() + nameStart, buf.begin() + (end + 1));
 		}
 };
 
@@ -191,6 +187,37 @@ class PatternAbbreviatorFragment
 
 			return nextDot;
 		}
+
+		/**
+		 * Abbreviate all '.' separated elements of \c buf from \c startPos.
+		 * @param buf buffer to receive element.
+		 * @param startPos starting index of name element.
+		 */
+		void abbreviateAll(LogString& buf, LogString::size_type startPos) const
+		{
+			logchar separ = 0x2E; /* '.' */
+			LogString abbreviation;
+			abbreviation.reserve(buf.length());
+			auto pos = startPos;
+			LogString::size_type nextDot;
+			while (pos < buf.length() && buf.npos != (nextDot = buf.find(separ, pos)))
+			{
+				if (pos + charCount < nextDot)
+				{
+					abbreviation.append(buf.begin() + pos, buf.begin() + (pos + charCount));
+					if (ellipsis != 0x00)
+						abbreviation.append(1, ellipsis);
+				}
+				else
+					abbreviation.append(buf.begin() + pos, buf.begin() + nextDot);
+				abbreviation.append(1, separ);
+				pos = nextDot + 1;
+			}
+			if (pos < buf.length())
+				abbreviation.append(buf.begin() + pos, buf.end());
+			buf.erase(buf.begin() + startPos, buf.end());
+			buf.append(abbreviation);
+		}
 };
 
 /**
@@ -226,11 +253,9 @@ class PatternAbbreviator : public NameAbbreviator
 		}
 
 		/**
-		 * Abbreviate name.
-		 * @param buf buffer that abbreviated name is appended.
-		 * @param nameStart start of name.
+		 * {@inheritDoc}
 		 */
-		void abbreviate(LogString::size_type nameStart, LogString& buf) const
+		void abbreviate(LogString::size_type nameStart, LogString& buf) const override
 		{
 			//
 			//  all non-terminal patterns are executed once
@@ -244,15 +269,10 @@ class PatternAbbreviator : public NameAbbreviator
 			}
 
 			//
-			//   last pattern in executed repeatedly
+			//   apply the last pattern to all the remaining name parts
 			//
-			PatternAbbreviatorFragment terminalFragment =
-				fragments[fragments.size() - 1];
-
-			while (pos < buf.length())
-			{
-				pos = terminalFragment.abbreviate(buf, pos);
-			}
+			if (pos < buf.length())
+				fragments.back().abbreviateAll(buf, pos);
 		}
 };
 }
@@ -291,7 +311,23 @@ NameAbbreviatorPtr NameAbbreviator::getAbbreviator(const LogString& pattern)
 		//
 		if (i == trimmed.length())
 		{
-			return NameAbbreviatorPtr(new MaxElementAbbreviator(StringHelper::toInt(trimmed)));
+			int len = 256;
+			try
+			{
+				len = StringHelper::toInt(trimmed);
+			}
+			catch (const std::out_of_range& ex)
+			{
+				LogLog::warn(LOG4CXX_STR("Invalid name abreviator pattern: ") + pattern, ex);
+			}
+
+			if(len > 256){
+				len = 256;
+			}else if( len < 0 ){
+				len = 0;
+			}
+
+			return std::make_shared<MaxElementAbbreviator>(len);
 		}
 
 		std::vector<PatternAbbreviatorFragment> fragments;
@@ -345,8 +381,7 @@ NameAbbreviatorPtr NameAbbreviator::getAbbreviator(const LogString& pattern)
 			pos++;
 		}
 
-		NameAbbreviatorPtr abbrev(new PatternAbbreviator(fragments));
-		return abbrev;
+		return std::make_shared<PatternAbbreviator>(fragments);
 	}
 
 	//
@@ -362,7 +397,7 @@ NameAbbreviatorPtr NameAbbreviator::getAbbreviator(const LogString& pattern)
  */
 NameAbbreviatorPtr NameAbbreviator::getDefaultAbbreviator()
 {
-	static NameAbbreviatorPtr def(new NOPAbbreviator());
+	static WideLife<NameAbbreviatorPtr> def = std::make_shared<NOPAbbreviator>();
 	return def;
 }
 

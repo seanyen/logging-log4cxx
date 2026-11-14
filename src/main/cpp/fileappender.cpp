@@ -25,98 +25,66 @@
 #include <log4cxx/helpers/outputstreamwriter.h>
 #include <log4cxx/helpers/bufferedwriter.h>
 #include <log4cxx/helpers/bytebuffer.h>
+#include "log4cxx/helpers/threadutility.h"
+#include <log4cxx/private/writerappender_priv.h>
+#include <log4cxx/private/fileappender_priv.h>
+#include <limits>
 #include <mutex>
 
-using namespace log4cxx;
-using namespace log4cxx::helpers;
-using namespace log4cxx::spi;
+using namespace LOG4CXX_NS;
+using namespace LOG4CXX_NS::helpers;
+using namespace LOG4CXX_NS::spi;
 
 IMPLEMENT_LOG4CXX_OBJECT(FileAppender)
 
+#define _priv static_cast<FileAppenderPriv*>(m_priv.get())
 
-FileAppender::FileAppender()
+FileAppender::FileAppender() :
+	WriterAppender (std::make_unique<FileAppenderPriv>())
 {
-	std::unique_lock<log4cxx::shared_mutex> lock(mutex);
-	fileAppend = true;
-	bufferedIO = false;
-	bufferSize = 8 * 1024;
 }
 
-FileAppender::FileAppender(const LayoutPtr& layout1, const LogString& fileName1,
-	bool append1, bool bufferedIO1, int bufferSize1)
-	: WriterAppender(layout1)
+FileAppender::FileAppender
+	( const LayoutPtr& layout
+	, const LogString& fileName
+	, bool             appendToFile
+	, bool             useBufferedOutput
+	, int              bufferByteCount
+	)
+	: WriterAppender(std::make_unique<FileAppenderPriv>(layout, fileName, appendToFile, useBufferedOutput, bufferByteCount))
 {
-	{
-		std::unique_lock<log4cxx::shared_mutex> lock(mutex);
-		fileAppend = append1;
-		fileName = fileName1;
-		bufferedIO = bufferedIO1;
-		bufferSize = bufferSize1;
-	}
-	Pool p;
-	activateOptions(p);
+	_priv->activate();
 }
 
-FileAppender::FileAppender(const LayoutPtr& layout1, const LogString& fileName1,
-	bool append1)
-	: WriterAppender(layout1)
+FileAppender::FileAppender(std::unique_ptr<FileAppenderPriv> priv)
+	: WriterAppender (std::move(priv))
 {
-	{
-		std::unique_lock<log4cxx::shared_mutex> lock(mutex);
-		fileAppend = append1;
-		fileName = fileName1;
-		bufferedIO = false;
-		bufferSize = 8 * 1024;
-	}
-	Pool p;
-	activateOptions(p);
-}
-
-FileAppender::FileAppender(const LayoutPtr& layout1, const LogString& fileName1)
-	: WriterAppender(layout1)
-{
-	{
-		std::unique_lock<log4cxx::shared_mutex> lock(mutex);
-		fileAppend = true;
-		fileName = fileName1;
-		bufferedIO = false;
-		bufferSize = 8 * 1024;
-	}
-	Pool p;
-	activateOptions(p);
 }
 
 FileAppender::~FileAppender()
 {
-	finalize();
+	if (auto p = _priv->taskManager.lock())
+		p->value().removePeriodicTask(_priv->flushTaskName);
+	if (_priv->flushTask)
+		_priv->flushTask->detach(); // Blocks until any in-flight flush completes
 }
 
 void FileAppender::setAppend(bool fileAppend1)
 {
-	std::unique_lock<log4cxx::shared_mutex> lock(mutex);
-	this->fileAppend = fileAppend1;
+	std::lock_guard<std::recursive_mutex> lock(_priv->mutex);
+	_priv->fileAppend = fileAppend1;
 }
 
 void FileAppender::setFile(const LogString& file)
 {
-	std::unique_lock<log4cxx::shared_mutex> lock(mutex);
-	setFileInternal(file);
-}
-
-void FileAppender::setFileInternal(const LogString& file)
-{
-	fileName = file;
+	std::lock_guard<std::recursive_mutex> lock(_priv->mutex);
+	_priv->targetFile.setPath(file);
 }
 
 void FileAppender::setBufferedIO(bool bufferedIO1)
 {
-	std::unique_lock<log4cxx::shared_mutex> lock(mutex);
-	this->bufferedIO = bufferedIO1;
-
-	if (bufferedIO1)
-	{
-		setImmediateFlush(false);
-	}
+	std::lock_guard<std::recursive_mutex> lock(_priv->mutex);
+	_priv->bufferedIO = bufferedIO1;
 }
 
 void FileAppender::setOption(const LogString& option,
@@ -125,28 +93,38 @@ void FileAppender::setOption(const LogString& option,
 	if (StringHelper::equalsIgnoreCase(option, LOG4CXX_STR("FILE"), LOG4CXX_STR("file"))
 		|| StringHelper::equalsIgnoreCase(option, LOG4CXX_STR("FILENAME"), LOG4CXX_STR("filename")))
 	{
-		std::unique_lock<log4cxx::shared_mutex> lock(mutex);
-		fileName = stripDuplicateBackslashes(value);
+		std::lock_guard<std::recursive_mutex> lock(_priv->mutex);
+		_priv->targetFile.setPath(stripDuplicateBackslashes(value));
 	}
 	else if (StringHelper::equalsIgnoreCase(option, LOG4CXX_STR("APPEND"), LOG4CXX_STR("append")))
 	{
-		std::unique_lock<log4cxx::shared_mutex> lock(mutex);
-		fileAppend = OptionConverter::toBoolean(value, true);
+		std::lock_guard<std::recursive_mutex> lock(_priv->mutex);
+		_priv->fileAppend = OptionConverter::toBoolean(value, true);
 	}
 	else if (StringHelper::equalsIgnoreCase(option, LOG4CXX_STR("BUFFEREDIO"), LOG4CXX_STR("bufferedio")))
 	{
-		std::unique_lock<log4cxx::shared_mutex> lock(mutex);
-		bufferedIO = OptionConverter::toBoolean(value, true);
+		std::lock_guard<std::recursive_mutex> lock(_priv->mutex);
+		_priv->bufferedIO = OptionConverter::toBoolean(value, false);
 	}
 	else if (StringHelper::equalsIgnoreCase(option, LOG4CXX_STR("IMMEDIATEFLUSH"), LOG4CXX_STR("immediateflush")))
 	{
-		std::unique_lock<log4cxx::shared_mutex> lock(mutex);
-		bufferedIO = !OptionConverter::toBoolean(value, false);
+		std::lock_guard<std::recursive_mutex> lock(_priv->mutex);
+		_priv->bufferedIO = !OptionConverter::toBoolean(value, false);
 	}
 	else if (StringHelper::equalsIgnoreCase(option, LOG4CXX_STR("BUFFERSIZE"), LOG4CXX_STR("buffersize")))
 	{
-		std::unique_lock<log4cxx::shared_mutex> lock(mutex);
-		bufferSize = OptionConverter::toFileSize(value, 8 * 1024);
+		std::lock_guard<std::recursive_mutex> lock(_priv->mutex);
+		_priv->bufferSize = OptionConverter::toFileSize(value, 8 * 1024);
+	}
+	else if (StringHelper::equalsIgnoreCase(option, LOG4CXX_STR("BUFFEREDSECONDS"), LOG4CXX_STR("bufferedseconds")))
+	{
+		std::lock_guard<std::recursive_mutex> lock(_priv->mutex);
+		_priv->bufferedSeconds = OptionConverter::toInt(value, 0);
+	}
+	else if (StringHelper::equalsIgnoreCase(option, LOG4CXX_STR("LAZYFILECREATION"), LOG4CXX_STR("lazyfilecreation")))
+	{
+		std::lock_guard<std::recursive_mutex> lock(_priv->mutex);
+		_priv->lazyFileCreation = OptionConverter::toBoolean(value, false);
 	}
 	else
 	{
@@ -154,44 +132,71 @@ void FileAppender::setOption(const LogString& option,
 	}
 }
 
-void FileAppender::activateOptions(Pool& p)
+void FileAppender::activateOptions(  )
 {
-	std::unique_lock<log4cxx::shared_mutex> lock(mutex);
-	activateOptionsInternal(p);
+	std::lock_guard<std::recursive_mutex> lock(_priv->mutex);
+	// It does not make sense to have immediate flush and bufferedIO.
+	if (_priv->bufferedIO)
+	   setImmediateFlush(false);
+	_priv->activate();
 }
 
-void FileAppender::activateOptionsInternal(Pool& p)
+void FileAppender::FileAppenderPriv::activate()
 {
 	int errors = 0;
 
-	if (!fileName.empty())
+	if (this->targetFile.hasPath())
 	{
 		try
 		{
-			setFileInternal(fileName, fileAppend, bufferedIO, bufferSize, p);
+			this->open();
 		}
-		catch (IOException& e)
+		catch (const IOException& e)
 		{
 			errors++;
 			LogString msg(LOG4CXX_STR("setFile("));
-			msg.append(fileName);
+			msg.append(this->targetFile.getPath());
 			msg.append(1, (logchar) 0x2C /* ',' */);
-			StringHelper::toString(fileAppend, msg);
+			StringHelper::toString(this->fileAppend, msg);
 			msg.append(LOG4CXX_STR(") call failed."));
-			errorHandler->error(msg, e, ErrorCode::FILE_OPEN_FAILURE);
+			this->errorHandler->error(msg, e, ErrorCode::OPEN_FAILURE);
 		}
 	}
 	else
 	{
 		errors++;
 		LogLog::error(LogString(LOG4CXX_STR("File option not set for appender ["))
-			+  name + LOG4CXX_STR("]."));
+			+  this->name + LOG4CXX_STR("]."));
 		LogLog::warn(LOG4CXX_STR("Are you using FileAppender instead of ConsoleAppender?"));
 	}
 
 	if (errors == 0)
 	{
-		WriterAppender::activateOptions(p);
+		this->checkConfiguration();
+		if (auto p = this->taskManager.lock())
+			p->value().removePeriodicTask(this->flushTaskName);
+
+		if (!this->bufferedIO)
+			;
+		else if (0 < this->bufferedSeconds)
+		{
+			auto taskManager = ThreadUtility::instancePtr();
+			if (!this->flushTask)
+			{
+				this->flushTask = std::make_shared<FileAppenderPriv::FlushTask>();
+				this->flushTask->priv = this;
+			}
+			// Key the task by a unique name
+			this->flushTaskName = this->targetFile.getName();
+			this->flushTaskName.append(1, (logchar) 0x23 /* '#' */);
+			StringHelper::toString(reinterpret_cast<size_t>(this), this->flushTaskName);
+			auto flushTask = this->flushTask;
+			taskManager->value().addPeriodicTask(this->flushTaskName
+				, [flushTask]() { flushTask->run(); }
+				, std::chrono::seconds(this->bufferedSeconds)
+				);
+			this->taskManager = taskManager;
+		}
 	}
 }
 
@@ -250,54 +255,21 @@ LogString FileAppender::stripDuplicateBackslashes(const LogString& src)
 	return src;
 }
 
-/**
-  <p>Sets and <i>opens</i> the file where the log output will
-  go. The specified file must be writable.
-
-  <p>If there was already an opened file, then the previous file
-  is closed first.
-
-  <p><b>Do not use this method directly. To configure a FileAppender
-  or one of its subclasses, set its properties one by one and then
-  call activateOptions.</b>
-
-  @param filename The path to the log file.
-  @param append   If true will append to fileName. Otherwise will
-      truncate fileName.
-  @param bufferedIO
-  @param bufferSize
-
-  @throws IOException
-
- */
-void FileAppender::setFileInternal(
-	const LogString& filename,
-	bool append1,
-	bool bufferedIO1,
-	size_t bufferSize1,
-	Pool& p)
+void FileAppender::FileAppenderPriv::open()
 {
-	// It does not make sense to have immediate flush and bufferedIO.
-	if (bufferedIO1)
-	{
-		setImmediateFlush(false);
-	}
-
-	closeWriter();
+	this->shutdown();
 
 	bool writeBOM = false;
 
-	if (StringHelper::equalsIgnoreCase(getEncoding(),
+	if (StringHelper::equalsIgnoreCase(this->encoding,
 			LOG4CXX_STR("utf-16"), LOG4CXX_STR("UTF-16")))
 	{
 		//
 		//    don't want to write a byte order mark if the file exists
 		//
-		if (append1)
+		if (this->fileAppend)
 		{
-			File outFile;
-			outFile.setPath(filename);
-			writeBOM = !outFile.exists(p);
+			writeBOM = !this->targetFile.exists();
 		}
 		else
 		{
@@ -307,31 +279,54 @@ void FileAppender::setFileInternal(
 
 	OutputStreamPtr outStream;
 
-	try
+	if (this->lazyFileCreation)
 	{
-		outStream = FileOutputStreamPtr(new FileOutputStream(filename, append1));
-	}
-	catch (IOException&)
-	{
-		LogString parentName = File().setPath(filename).getParent(p);
+		LogString parentName = this->targetFile.getParent();
 
 		if (!parentName.empty())
 		{
-			File parentDir;
-			parentDir.setPath(parentName);
+			File parentDir(parentName);
 
-			if (!parentDir.exists(p) && parentDir.mkdirs(p))
+			if (!parentDir.exists())
 			{
-				outStream = OutputStreamPtr(new FileOutputStream(filename, append1));
+				LogLog::debug(LOG4CXX_STR("Creating dirs ") + parentDir.getPath());
+				// The file is not opened here, so a failure must be reported now.
+				if (!parentDir.mkdirs() && !parentDir.exists())
+				{
+					throw IOException(LOG4CXX_STR("Unable to create directory ") + parentDir.getPath());
+				}
+			}
+		}
+
+		outStream = std::make_shared<FileOutputStream>(this->targetFile.getPath(), this->fileAppend, true);
+	}
+	else
+	{
+		try
+		{
+			outStream = std::make_shared<FileOutputStream>(this->targetFile.getPath(), this->fileAppend);
+		}
+		catch (const IOException&)
+		{
+			LogString parentName = this->targetFile.getParent();
+
+			if (!parentName.empty())
+			{
+				File parentDir(parentName);
+
+				if (!parentDir.exists() && parentDir.mkdirs())
+				{
+					outStream = std::make_shared<FileOutputStream>(this->targetFile.getPath(), this->fileAppend);
+				}
+				else
+				{
+					throw;
+				}
 			}
 			else
 			{
 				throw;
 			}
-		}
-		else
-		{
-			throw;
 		}
 	}
 
@@ -341,25 +336,68 @@ void FileAppender::setFileInternal(
 	//
 	if (writeBOM)
 	{
+		Pool p;
 		char bom[] = { (char) 0xFE, (char) 0xFF };
 		ByteBuffer buf(bom, 2);
-		outStream->write(buf, p);
+		outStream->write(buf);
 	}
 
-	WriterPtr newWriter(createWriter(outStream));
+	WriterPtr newWriter(this->createWriter(outStream));
 
-	if (bufferedIO1)
+	if (this->bufferedIO)
 	{
-		newWriter = WriterPtr(new BufferedWriter(newWriter, bufferSize1));
+		newWriter = std::make_shared<BufferedWriter>(newWriter, this->bufferSize);
 	}
 
-	setWriterInternal(newWriter);
+	this->setWriter(newWriter);
 
-	this->fileAppend = append1;
-	this->bufferedIO = bufferedIO1;
-	this->fileName = filename;
-	this->bufferSize = (int)bufferSize1;
-	writeHeader(p);
+	this->writeHeader();
 
+}
+
+LogString FileAppender::getFile() const
+{
+	return _priv->targetFile.getPath();
+}
+
+bool FileAppender::getBufferedIO() const
+{
+	return _priv->bufferedIO;
+}
+
+size_t FileAppender::getBufferSize() const
+{
+	return _priv->bufferSize;
+}
+
+int FileAppender::getBufferedSeconds() const
+{
+	return _priv->bufferedSeconds;
+}
+
+void FileAppender::setBufferSize(size_t newValue)
+{
+	_priv->bufferSize = newValue;
+}
+
+void FileAppender::setBufferedSeconds(int newValue)
+{
+	_priv->bufferedSeconds = newValue;
+}
+
+bool FileAppender::getAppend() const
+{
+	return _priv->fileAppend;
+}
+
+void FileAppender::setLazyFileCreation(bool newValue)
+{
+	std::lock_guard<std::recursive_mutex> lock(_priv->mutex);
+	_priv->lazyFileCreation = newValue;
+}
+
+bool FileAppender::getLazyFileCreation() const
+{
+	return _priv->lazyFileCreation;
 }
 

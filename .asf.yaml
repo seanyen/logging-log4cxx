@@ -15,6 +15,7 @@
 
 notifications:
   jira_options: link label
+  discussions: dev@logging.apache.org
 
 github:
   description: "Apache Log4cxx is a C++ port of Apache Log4j"
@@ -23,3 +24,19 @@ github:
     - apache
     - logging
     - cpp
+  features:
+    issues: true
+    discussions: true
+  rulesets:
+    - name: "Default Branch Protection"
+      type: branch
+      branches:
+        includes:
+          - "~DEFAULT_BRANCH"
+          - "release/*"
+          - "rel/*"
+        excludes: []
+      bypass_teams:
+        - root
+      restrict_deletion: true
+      restrict_force_push: true

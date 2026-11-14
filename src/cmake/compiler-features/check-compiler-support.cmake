@@ -1,0 +1,41 @@
+# This module checks compiler and standard library support
+#
+# Attempt to compile and link a basic C++ standard library feature
+try_compile(CXX_FRONTEND_IS_VALID "${CMAKE_BINARY_DIR}/Testing/test_cxx_compiler"
+    "${CMAKE_CURRENT_LIST_DIR}/test_cxx_compiler.cpp"
+    )
+if(NOT CXX_FRONTEND_IS_VALID)
+    message(FATAL_ERROR "The CXX compiler cannot link C++ standard library features. Ensure CMAKE_CXX_COMPILER is pointing to a C++ frontend (e.g., clang++ instead of clang).")
+endif()
+
+include(CheckCXXCompilerFlag)
+
+# Does the compiler support the Safe Buffers diagnostic -Wunsafe-buffer-usage?
+# (Clang >= 16.)  Used to enforce, on a per-file basis, that translation units
+# migrated to the Safe Buffers Programming Model stay free of unchecked raw
+# pointer/array arithmetic.  See LOG4CXX_ENABLE_SAFE_BUFFERS.
+check_cxx_compiler_flag("-Wunsafe-buffer-usage" LOG4CXX_HAS_WUNSAFE_BUFFER_USAGE)
+
+# Does the compiler support thread_local?
+if(MINGW AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 16.0)
+   # As at 2024-7-19 the msys2 ucrt-x86_64 runtime terminates with error c0000374 during thread local data cleanup
+   set(HAS_THREAD_LOCAL FALSE)
+else()
+  try_compile(HAS_THREAD_LOCAL "${CMAKE_BINARY_DIR}/Testing/thread-local-test"
+    "${CMAKE_CURRENT_LIST_DIR}/test-thread-local.cpp"
+    CXX_STANDARD 11
+    )
+endif()
+
+# Does the standard library support std::make_unique<T>>?
+try_compile(STD_MAKE_UNIQUE_FOUND "${CMAKE_BINARY_DIR}/Testing/make-unique-test"
+    "${CMAKE_CURRENT_LIST_DIR}/test-make-unique.cpp")
+if( ${STD_MAKE_UNIQUE_FOUND} )
+    set(STD_MAKE_UNIQUE_IMPL "std::make_unique")
+    set(STD_MAKE_UNIQUE_FOUND 1)
+else()
+    set(STD_MAKE_UNIQUE_IMPL "log4cxx std::make_unique")
+    set(STD_MAKE_UNIQUE_FOUND 0)
+endif()
+
+

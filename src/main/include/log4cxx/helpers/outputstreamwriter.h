@@ -22,7 +22,8 @@
 #include <log4cxx/helpers/outputstream.h>
 #include <log4cxx/helpers/charsetencoder.h>
 
-namespace log4cxx
+
+namespace LOG4CXX_NS
 {
 
 namespace helpers
@@ -34,8 +35,7 @@ namespace helpers
 class LOG4CXX_EXPORT OutputStreamWriter : public Writer
 {
 	private:
-		OutputStreamPtr out;
-		CharsetEncoderPtr enc;
+		LOG4CXX_DECLARE_PRIVATE_MEMBER_PTR(OutputStreamWriterPrivate, m_priv)
 
 	public:
 		DECLARE_ABSTRACT_LOG4CXX_OBJECT(OutputStreamWriter)
@@ -44,21 +44,19 @@ class LOG4CXX_EXPORT OutputStreamWriter : public Writer
 		LOG4CXX_CAST_ENTRY_CHAIN(Writer)
 		END_LOG4CXX_CAST_MAP()
 
-		OutputStreamWriter(OutputStreamPtr& out);
-		OutputStreamWriter(OutputStreamPtr& out, CharsetEncoderPtr& enc);
+		OutputStreamWriter(const OutputStreamPtr& out);
+		OutputStreamWriter(const OutputStreamPtr& out, const CharsetEncoderPtr& enc);
 		~OutputStreamWriter();
 
-		virtual void close(Pool& p);
-		virtual void flush(Pool& p);
-		virtual void write(const LogString& str, Pool& p);
+		using Writer::close;
+		void close(  ) override;
+		using Writer::flush;
+		void flush(  ) override;
+		using Writer::write;
+		void write( const LogString& str ) override;
 		LogString getEncoding() const;
 
-#ifdef LOG4CXX_MULTI_PROCESS
-		OutputStreamPtr getOutPutStreamPtr()
-		{
-			return out;
-		}
-#endif
+		OutputStreamPtr getOutputStreamPtr() const;
 
 	private:
 		OutputStreamWriter(const OutputStreamWriter&);

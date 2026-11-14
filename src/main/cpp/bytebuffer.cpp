@@ -15,15 +15,14 @@
  * limitations under the License.
  */
 #include <log4cxx/logstring.h>
-#include <log4cxx/helpers/bytebuffer.h>
-#include <log4cxx/helpers/exception.h>
-#include <log4cxx/helpers/pool.h>
+#include <log4cxx/private/bytebuffer_priv.h>
+#include <cstring>
 
-using namespace log4cxx;
-using namespace log4cxx::helpers;
+using namespace LOG4CXX_NS;
+using namespace LOG4CXX_NS::helpers;
 
 ByteBuffer::ByteBuffer(char* data1, size_t capacity)
-	: base(data1), pos(0), lim(capacity), cap(capacity)
+	: m_priv(std::make_unique<ByteBufferPriv>(data1, capacity))
 {
 }
 
@@ -31,48 +30,68 @@ ByteBuffer::~ByteBuffer()
 {
 }
 
+ByteBufferPriv& ByteBuffer::impl()
+{
+    return *m_priv;
+}
+
 void ByteBuffer::clear()
 {
-	lim = cap;
-	pos = 0;
+	m_priv->clear();
+}
+
+void ByteBuffer::carry()
+{
+	m_priv->carry();
 }
 
 void ByteBuffer::flip()
 {
-	lim = pos;
-	pos = 0;
-}
-
-void ByteBuffer::position(size_t newPosition)
-{
-	if (newPosition < lim)
-	{
-		pos = newPosition;
-	}
-	else
-	{
-		pos = lim;
-	}
-}
-
-void ByteBuffer::limit(size_t newLimit)
-{
-	if (newLimit > cap)
-	{
-		throw IllegalArgumentException(LOG4CXX_STR("newLimit"));
-	}
-
-	lim = newLimit;
+	m_priv->flip();
 }
 
 
 bool ByteBuffer::put(char byte)
 {
-	if (pos < lim)
-	{
-		base[pos++] = byte;
-		return true;
-	}
+	return m_priv->put(byte);
+}
 
-	return false;
+char* ByteBuffer::data()
+{
+	return m_priv->data();
+}
+
+const char* ByteBuffer::data() const
+{
+	return m_priv->data();
+}
+
+char* ByteBuffer::current()
+{
+	return m_priv->current();
+}
+
+const char* ByteBuffer::current() const
+{
+	return m_priv->current();
+}
+
+size_t ByteBuffer::limit() const
+{
+	return m_priv->limit();
+}
+
+size_t ByteBuffer::position() const
+{
+	return m_priv->position();
+}
+
+size_t ByteBuffer::remaining() const
+{
+	return m_priv->remaining();
+}
+
+size_t ByteBuffer::increment_position(size_t byteCount)
+{
+    return m_priv->increment_position(byteCount);
 }

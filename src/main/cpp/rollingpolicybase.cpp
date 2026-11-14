@@ -14,10 +14,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#if defined(_MSC_VER)
-	#pragma warning ( disable: 4231 4251 4275 4786 )
-#endif
-
 
 #include <log4cxx/logstring.h>
 #include <log4cxx/rolling/rollingpolicybase.h>
@@ -28,27 +24,39 @@
 #include <log4cxx/pattern/patternparser.h>
 #include <log4cxx/pattern/integerpatternconverter.h>
 #include <log4cxx/pattern/datepatternconverter.h>
+#include <log4cxx/helpers/optionconverter.h>
+#include <log4cxx/private/rollingpolicybase_priv.h>
 
-using namespace log4cxx;
-using namespace log4cxx::rolling;
-using namespace log4cxx::helpers;
-using namespace log4cxx::pattern;
+using namespace LOG4CXX_NS;
+using namespace LOG4CXX_NS::rolling;
+using namespace LOG4CXX_NS::helpers;
+using namespace LOG4CXX_NS::pattern;
 
 IMPLEMENT_LOG4CXX_OBJECT(RollingPolicyBase)
 
-RollingPolicyBase::RollingPolicyBase()
+RollingPolicyBase::RollingPolicyBase() :
+	m_priv(std::make_unique<RollingPolicyBasePrivate>())
 {
+}
+
+RollingPolicyBase::RollingPolicyBase( std::unique_ptr<RollingPolicyBasePrivate> priv ) :
+	m_priv(std::move(priv)){
 }
 
 RollingPolicyBase::~RollingPolicyBase()
 {
 }
 
-void RollingPolicyBase::activateOptions(log4cxx::helpers::Pool& /* pool */)
+void RollingPolicyBase::activateOptions(   )
 {
-	if (fileNamePatternStr.length() > 0)
+	m_priv->activateOptions(getFormatSpecifiers());
+}
+
+void RollingPolicyBase::RollingPolicyBasePrivate::activateOptions(const pattern::PatternMap& map)
+{
+	if (this->fileNamePatternStr.length() > 0)
 	{
-		parseFileNamePattern();
+		this->parseFileNamePattern(map);
 	}
 	else
 	{
@@ -67,19 +75,26 @@ void RollingPolicyBase::setOption(const LogString& option, const LogString& valu
 			LOG4CXX_STR("FILENAMEPATTERN"),
 			LOG4CXX_STR("filenamepattern")))
 	{
-		fileNamePatternStr = value;
+		m_priv->fileNamePatternStr = value;
+	}else if (StringHelper::equalsIgnoreCase(option,
+			LOG4CXX_STR("CREATEINTERMEDIATEDIRECTORIES"),
+			LOG4CXX_STR("createintermediatedirectories")))
+	{
+		m_priv->createIntermediateDirectories = OptionConverter::toBoolean(value, false);
 	}
+	else
+		RollingPolicy::setOption(option, value);
 }
 
 void RollingPolicyBase::setFileNamePattern(const LogString& fnp)
 {
-	fileNamePatternStr = fnp;
+	m_priv->fileNamePatternStr = fnp;
 }
 
 
 LogString RollingPolicyBase::getFileNamePattern() const
 {
-	return fileNamePatternStr;
+	return m_priv->fileNamePatternStr;
 }
 
 /**
@@ -87,12 +102,12 @@ LogString RollingPolicyBase::getFileNamePattern() const
  */
 void RollingPolicyBase::parseFileNamePattern()
 {
-	patternConverters.erase(patternConverters.begin(), patternConverters.end());
-	patternFields.erase(patternFields.begin(), patternFields.end());
-	PatternParser::parse(fileNamePatternStr,
-		patternConverters,
-		patternFields,
-		getFormatSpecifiers());
+	m_priv->parseFileNamePattern(getFormatSpecifiers());
+}
+
+void RollingPolicyBase::RollingPolicyBasePrivate::parseFileNamePattern(const pattern::PatternMap& map)
+{
+	this->patternConverters = PatternParser::parse(this->fileNamePatternStr, map);
 }
 
 /**
@@ -102,65 +117,64 @@ void RollingPolicyBase::parseFileNamePattern()
  * @param buf string buffer to which formatted file name is appended, may not be null.
  */
 void RollingPolicyBase::formatFileName(
-	ObjectPtr& obj,
-	LogString& toAppendTo,
-	Pool& pool) const
+	const ObjectPtr& obj,
+	LogString& toAppendTo) const
 {
-	std::vector<FormattingInfoPtr>::const_iterator formatterIter =
-		patternFields.begin();
-
-	for (std::vector<PatternConverterPtr>::const_iterator
-		converterIter = patternConverters.begin();
-		converterIter != patternConverters.end();
-		converterIter++, formatterIter++)
+	for (auto item : m_priv->patternConverters)
 	{
-		int startField = toAppendTo.length();
-		(*converterIter)->format(obj, toAppendTo, pool);
-		(*formatterIter)->format(startField, toAppendTo);
+		auto startField = toAppendTo.length();
+		item->format(obj, toAppendTo);
+		item->getFormattingInfo().adjustField(startField, toAppendTo);
 	}
 }
-
 
 PatternConverterPtr RollingPolicyBase::getIntegerPatternConverter() const
 {
 	for (std::vector<PatternConverterPtr>::const_iterator
-		converterIter = patternConverters.begin();
-		converterIter != patternConverters.end();
+		converterIter = m_priv->patternConverters.begin();
+		converterIter != m_priv->patternConverters.end();
 		converterIter++)
 	{
 		IntegerPatternConverterPtr intPattern;
 		PatternConverterPtr patternptr = (*converterIter);
-		intPattern = log4cxx::cast<IntegerPatternConverter>(patternptr);
+		intPattern = LOG4CXX_NS::cast<IntegerPatternConverter>(patternptr);
 
 		if (intPattern != NULL)
 		{
 			return *converterIter;
 		}
 	}
-
-	PatternConverterPtr noMatch;
-	return noMatch;
+	return {};
 }
 
 PatternConverterPtr RollingPolicyBase::getDatePatternConverter() const
 {
 	for (std::vector<PatternConverterPtr>::const_iterator
-		converterIter = patternConverters.begin();
-		converterIter != patternConverters.end();
+		converterIter = m_priv->patternConverters.begin();
+		converterIter != m_priv->patternConverters.end();
 		converterIter++)
 	{
 		DatePatternConverterPtr datePattern;
 		PatternConverterPtr patternptr = (*converterIter);
-		datePattern = log4cxx::cast<DatePatternConverter>(patternptr);
+		datePattern = LOG4CXX_NS::cast<DatePatternConverter>(patternptr);
 
 		if (datePattern != NULL)
 		{
 			return *converterIter;
 		}
 	}
-
-	PatternConverterPtr noMatch;
-	return noMatch;
+	return {};
 }
 
+bool RollingPolicyBase::getCreateIntermediateDirectories() const{
+	return m_priv->createIntermediateDirectories;
+}
 
+void RollingPolicyBase::setCreateIntermediateDirectories(bool createIntermediate){
+	m_priv->createIntermediateDirectories = createIntermediate;
+}
+
+PatternConverterList RollingPolicyBase::getPatternConverterList() const
+{
+	return m_priv->patternConverters;
+}

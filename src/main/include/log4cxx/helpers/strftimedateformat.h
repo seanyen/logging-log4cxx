@@ -20,12 +20,7 @@
 
 #include <log4cxx/helpers/dateformat.h>
 
-#if defined(_MSC_VER)
-	#pragma warning ( push )
-	#pragma warning ( disable: 4251 )
-#endif
-
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 namespace helpers
 {
@@ -47,31 +42,22 @@ class LOG4CXX_EXPORT StrftimeDateFormat : public DateFormat
 		StrftimeDateFormat(const LogString& pattern);
 		~StrftimeDateFormat();
 
-		virtual void format(LogString& s,
-			log4cxx_time_t tm,
-			log4cxx::helpers::Pool& p) const;
+		using DateFormat::format;
+		void format( LogString& toAppendTo, log4cxx_time_t tm ) const override;
 
 		/**
 		*    Set time zone.
 		* @param zone new time zone.
 		*/
-		void setTimeZone(const TimeZonePtr& zone);
+		void setTimeZone(const TimeZonePtr& zone) override;
 
 
 	private:
-		/**
-		*    Time zone.
-		*/
-		TimeZonePtr timeZone;
-		std::string pattern;
+		LOG4CXX_DECLARE_PRIVATE_MEMBER_PTR(StrftimeDateFormatPrivate, m_priv)
 };
 
 
 }  // namespace helpers
 } // namespace log4cxx
-
-#if defined(_MSC_VER)
-	#pragma warning (pop)
-#endif
 
 #endif // _LOG4CXX_HELPERS_STRFTIME_DATE_FORMAT_H

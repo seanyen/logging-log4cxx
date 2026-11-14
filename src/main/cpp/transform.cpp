@@ -17,36 +17,63 @@
 
 #include <log4cxx/logstring.h>
 #include <log4cxx/helpers/transform.h>
+#include <log4cxx/helpers/transcoder.h>
+#include <functional>
 
-using namespace log4cxx;
-using namespace log4cxx::helpers;
+using namespace LOG4CXX_NS;
+using namespace LOG4CXX_NS::helpers;
 
-
-
-void Transform::appendEscapingTags(
-	LogString& buf, const LogString& input)
+namespace
 {
-	//Check if the string is zero length -- if so, return
-	//what was sent in.
+using CharProcessor = std::function<bool(LogString&, int)>;
 
-	if (input.length() == 0 )
+// Allowable XML 1.0 characters are:
+// #x9 | #xA | #xD | [#x20-#xD7FF] | [#xE000-#xFFFD] | [#x10000-#x10FFFF]
+void appendValidCharacters(LogString& buf, const LogString& input, CharProcessor handler = {}, bool handleValidCharacters = false)
+{
+	static const unsigned int specials[] =
+		{ 0x22 /* " */
+		, 0x26 /* & */
+		, 0x3C /* < */
+		, 0x3E /* > */
+		, 0x00
+		};
+	auto start = input.begin();
+	for (auto nextCodePoint = start; input.end() != nextCodePoint; )
 	{
-		return;
-	}
-
-	logchar specials[] = { 0x22 /* " */, 0x26 /* & */, 0x3C /* < */, 0x3E /* > */, 0x00 };
-	size_t start = 0;
-	size_t special = input.find_first_of(specials, start);
-
-	while (special != LogString::npos)
-	{
-		if (special > start)
+		auto lastCodePoint = nextCodePoint;
+		auto ch = static_cast<unsigned int>(*nextCodePoint);
+		if (ch <= 0x7f)
+			++nextCodePoint;
+		else
+			ch = Transcoder::getCodePoint(input, nextCodePoint);
+		if (((0x20 <= ch && ch <= 0xD7FF) &&
+				specials[0] != ch &&
+				specials[1] != ch &&
+				specials[2] != ch &&
+				specials[3] != ch) ||
+			(0x9 == ch || 0xA == ch || 0xD == ch) ||
+			(0xE000 <= ch && ch < 0xFFFD) ||
+			(0x10000 <= ch && ch <= 0x10FFFF))
 		{
-			buf.append(input, start, special - start);
+			LogString escaped;
+			if (handleValidCharacters && handler && handler(escaped, ch))
+			{
+				if (start != lastCodePoint)
+					buf.append(start, lastCodePoint);
+				buf.append(escaped);
+				start = nextCodePoint;
+			}
+			continue;
 		}
 
-		switch (input[special])
+		if (start != lastCodePoint)
+			buf.append(start, lastCodePoint);
+		start = nextCodePoint;
+		switch (ch)
 		{
+			case 0: // Do not output a NUL character
+				break;
 			case 0x22:
 				buf.append(LOG4CXX_STR("&quot;"));
 				break;
@@ -63,69 +90,120 @@ void Transform::appendEscapingTags(
 				buf.append(LOG4CXX_STR("&gt;"));
 				break;
 
+			case 0xFFFD: // The Unicode replacement character
+				Transform::appendCharacterReference(buf, 0xFFFD);
+				break;
+
 			default:
-				buf.append(1, input[special]);
+				if (handler && !handler(buf, ch))
+					Transform::appendCharacterReference(buf, ch);
 				break;
 		}
-
-		start = special + 1;
-
-		if (special < input.size())
-		{
-			special = input.find_first_of(specials, start);
-		}
-		else
-		{
-			special = LogString::npos;
-		}
 	}
-
-	if (start < input.size())
-	{
-		buf.append(input, start, input.size() - start);
-	}
+	buf.append(start, input.end());
 }
+
+bool appendCharacterReferenceHandler(LogString& buf, int ch)
+{
+	Transform::appendCharacterReference(buf, ch);
+	return true;
+}
+
+bool appendAttributeCharacterReference(LogString& buf, int ch)
+{
+	if (0x27 == ch || 0x9 == ch || 0xA == ch || 0xD == ch)
+	{
+		Transform::appendCharacterReference(buf, ch);
+		return true;
+	}
+
+	return false;
+}
+
+} // namespace
 
 void Transform::appendEscapingCDATA(
 	LogString& buf, const LogString& input)
 {
 	static const LogString CDATA_END(LOG4CXX_STR("]]>"));
-	static const LogString CDATA_EMBEDED_END(LOG4CXX_STR("]]>]]&gt;<![CDATA["));
-
 	const LogString::size_type CDATA_END_LEN = 3;
-
-
-	if (input.length() == 0 )
+	static const LogString CDATA_EMBEDED_END(LOG4CXX_STR("]]&gt;<![CDATA["));
+	auto start = input.begin();
+	for (auto nextCodePoint = start; input.end() != nextCodePoint; )
 	{
-		return;
-	}
-
-	LogString::size_type end = input.find(CDATA_END);
-
-	if (end == LogString::npos)
-	{
-		buf.append(input);
-		return;
-	}
-
-	LogString::size_type start = 0;
-
-	while (end != LogString::npos)
-	{
-		buf.append(input, start, end - start);
-		buf.append(CDATA_EMBEDED_END);
-		start = end + CDATA_END_LEN;
-
-		if (start < input.length())
+		bool cdataEnd = false;
+		auto lastCodePoint = nextCodePoint;
+		auto ch = Transcoder::getCodePoint(input, nextCodePoint);
+		if (CDATA_END[0] == ch && input.end() != nextCodePoint)
 		{
-			end = input.find(CDATA_END, start);
+			lastCodePoint = nextCodePoint;
+			if (CDATA_END[1] != Transcoder::decode(input, nextCodePoint) ||
+				input.end() == nextCodePoint ||
+				CDATA_END[2] != Transcoder::decode(input, nextCodePoint))
+			{
+				nextCodePoint = lastCodePoint;
+				continue;
+			}
+			lastCodePoint = nextCodePoint;
+			cdataEnd = true;
 		}
-		else
+		else if ((0x20 <= ch && ch <= 0xD7FF) ||
+				(0x9 == ch || 0xA == ch || 0xD == ch) ||
+				(0xE000 <= ch && ch < 0xFFFD) ||
+				(0x10000 <= ch && ch <= 0x10FFFF))
 		{
-			return;
+			continue;
 		}
-	}
 
-	buf.append(input, start, input.length() - start);
+		if (start != lastCodePoint)
+			buf.append(start, lastCodePoint);
+		if (cdataEnd)
+			buf.append(CDATA_EMBEDED_END);
+		else if (0 != ch)
+			appendCharacterReference(buf, ch);
+		start = nextCodePoint;
+	}
+	buf.append(start, input.end());
 }
 
+void Transform::appendCharacterReference(LogString& buf, unsigned int ch)
+{
+	auto toHexDigit = [](int ch) -> int
+	{
+		return (10 <= ch ? (0x61 - 10) : 0x30) + ch;
+	};
+	buf.push_back('&');
+	buf.push_back('#');
+	buf.push_back('x');
+	if (0xFFFFFFF < ch)
+		buf.push_back(toHexDigit((ch & 0xF0000000) >> 28));
+	if (0xFFFFFF < ch)
+		buf.push_back(toHexDigit((ch & 0xF000000) >> 24));
+	if (0xFFFFF < ch)
+		buf.push_back(toHexDigit((ch & 0xF00000) >> 20));
+	if (0xFFFF < ch)
+		buf.push_back(toHexDigit((ch & 0xF0000) >> 16));
+	if (0xFFF < ch)
+		buf.push_back(toHexDigit((ch & 0xF000) >> 12));
+	if (0xFF < ch)
+		buf.push_back(toHexDigit((ch & 0xF00) >> 8));
+	if (0xF < ch)
+		buf.push_back(toHexDigit((ch & 0xF0) >> 4));
+	buf.push_back(toHexDigit(ch & 0xF));
+	buf.push_back(';');
+}
+
+void Transform::appendEscapingTags(LogString& buf, const LogString& input)
+{
+	appendValidCharacters(buf, input, appendCharacterReferenceHandler);
+}
+
+void Transform::appendEscapingAttribute(LogString& buf, const LogString& input)
+{
+	appendValidCharacters(buf, input, appendAttributeCharacterReference, true);
+}
+
+void Transform::appendLegalCharacters(LogString& buf, const LogString& input)
+{
+	appendValidCharacters(buf, input);
+}

@@ -20,12 +20,7 @@
 
 #include <log4cxx/spi/filter.h>
 
-#if defined(_MSC_VER)
-	#pragma warning ( push )
-	#pragma warning ( disable: 4251 )
-#endif
-
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 namespace filter
 {
@@ -53,8 +48,7 @@ seeting up a <code>StringMatchFilter</code>.
 class LOG4CXX_EXPORT StringMatchFilter : public spi::Filter
 {
 	private:
-		bool acceptOnMatch;
-		LogString stringToMatch;
+		struct StringMatchFilterPrivate;
 
 	public:
 		typedef spi::Filter BASE_CLASS;
@@ -65,45 +59,35 @@ class LOG4CXX_EXPORT StringMatchFilter : public spi::Filter
 		END_LOG4CXX_CAST_MAP()
 
 		StringMatchFilter();
+		~StringMatchFilter();
 
 		/**
-		Set options
-		*/
-		virtual void setOption(const LogString& option,
-			const LogString& value);
+		\copybrief spi::OptionHandler::setOption()
 
-		inline void setStringToMatch(const LogString& stringToMatch1)
-		{
-			this->stringToMatch.assign(stringToMatch1);
-		}
+		Supported options | Supported values | Default value |
+		-------------- | ---------------- | --------------- |
+		StringToMatch | {any} | - |
+		AcceptOnMatch | True,False | True |
+		 */
+		void setOption(const LogString& option, const LogString& value) override;
 
-		inline const LogString& getStringToMatch() const
-		{
-			return stringToMatch;
-		}
+		void setStringToMatch(const LogString& stringToMatch1);
 
-		inline void setAcceptOnMatch(bool acceptOnMatch1)
-		{
-			this->acceptOnMatch = acceptOnMatch1;
-		}
+		const LogString& getStringToMatch() const;
 
-		inline bool getAcceptOnMatch() const
-		{
-			return acceptOnMatch;
-		}
+		void setAcceptOnMatch(bool acceptOnMatch1);
+
+		bool getAcceptOnMatch() const;
 
 		/**
 		Returns {@link log4cxx::spi::Filter#NEUTRAL NEUTRAL}
 		is there is no string match.
 		*/
-		FilterDecision decide(const spi::LoggingEventPtr& event) const;
+		FilterDecision decide(const spi::LoggingEventPtr& event) const override;
 }; // class StringMatchFilter
 LOG4CXX_PTR_DEF(StringMatchFilter);
 }  // namespace filter
 } // namespace log4cxx
 
-#if defined(_MSC_VER)
-	#pragma warning (pop)
-#endif
 
 #endif // _LOG4CXX_FILTER_STRING_MATCH_FILTER_H

@@ -18,72 +18,46 @@
 #ifndef _LOG4CXX_APPENDER_SKELETON_H
 #define _LOG4CXX_APPENDER_SKELETON_H
 
-#if defined(_MSC_VER)
-	#pragma warning ( push )
-	#pragma warning ( disable: 4231 4251 4275 4786 )
-#endif
-
-
 #include <log4cxx/appender.h>
 #include <log4cxx/layout.h>
 #include <log4cxx/spi/errorhandler.h>
 #include <log4cxx/spi/filter.h>
 #include <log4cxx/helpers/object.h>
-#include <log4cxx/helpers/pool.h>
 #include <log4cxx/level.h>
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
+
 /**
 *  Implementation base class for all appenders.
 *
 *  This class provides the code for common functionality, such as
 *  support for threshold filtering and support for general filters.
 * */
-class LOG4CXX_EXPORT AppenderSkeleton :
-	public virtual Appender,
-	public virtual helpers::Object
+class LOG4CXX_EXPORT AppenderSkeleton
+	: public Appender
 {
 	protected:
-		/** The layout variable does not need to be set if the appender
-		implementation has its own layout. */
-		LayoutPtr layout;
-
-		/** Appenders are named. */
-		LogString name;
+		LOG4CXX_DECLARE_PRIVATE_MEMBER_PTR(AppenderSkeletonPrivate, m_priv)
+		AppenderSkeleton(LOG4CXX_PRIVATE_PTR(AppenderSkeletonPrivate) priv);
 
 		/**
-		There is no level threshold filtering by default.  */
-		LevelPtr threshold;
-
-		/**
-		It is assumed and enforced that errorHandler is never null.
-		*/
-		spi::ErrorHandlerPtr errorHandler;
-
-		/** The first filter in the filter chain. Set to <code>null</code>
-		initially. */
-		spi::FilterPtr headFilter;
-
-		/** The last filter in the filter chain. */
-		spi::FilterPtr tailFilter;
-
-		/**
-		Is this appender closed?
-		*/
-		bool closed;
-
-		log4cxx::helpers::Pool pool;
-		mutable log4cxx::shared_mutex mutex;
-
-		/**
-		Subclasses of <code>AppenderSkeleton</code> should implement this
+		Subclasses of <code>AppenderSkeleton</code> must implement this
 		method to perform actual logging. See also AppenderSkeleton::doAppend
 		method.
 		*/
-		virtual void append(const spi::LoggingEventPtr& event, log4cxx::helpers::Pool& p) = 0;
+		virtual void append( const spi::LoggingEventPtr& event ) = 0;
 
-		void doAppendImpl(const spi::LoggingEventPtr& event, log4cxx::helpers::Pool& pool);
+		/**
+		* Call the AppenderSkeleton#append method if
+		* the level of \c event is not lower than this appender's threshold and
+		* no attached spi::Filter indicates \c event is rejected.
+		*/
+		void doAppendImpl( const spi::LoggingEventPtr& event );
+		/**
+		* Does no attached filter deny \c event or does an attached filter accept \c event?
+		*/
+		bool isAccepted(const spi::LoggingEventPtr& event) const;
 
 	public:
 		DECLARE_ABSTRACT_LOG4CXX_OBJECT(AppenderSkeleton)
@@ -93,142 +67,123 @@ class LOG4CXX_EXPORT AppenderSkeleton :
 		LOG4CXX_CAST_ENTRY(spi::OptionHandler)
 		END_LOG4CXX_CAST_MAP()
 
-		AppenderSkeleton();
-		AppenderSkeleton(const LayoutPtr& layout);
+		AppenderSkeleton(const LayoutPtr& layout = {});
+		virtual ~AppenderSkeleton();
+
+
+		using spi::OptionHandler::activateOptions;
+		/**
+		\copybrief spi::OptionHandler::activateOptions()
+
+		No action is performed in this implementation.
+		*/
+		void activateOptions(  ) override;
 
 		/**
-		Finalize this appender by calling the derived class'
-		<code>close</code> method.
+		\copybrief spi::OptionHandler::setOption()
+
+		Supported options | Supported values | Default value |
+		-------------- | ---------------- | --------------- |
+		Name      | {any} | - |
+		Threshold | Trace,Debug,Info,Warn,Error,Fatal,Off,All | All |
 		*/
-		void finalize();
+		void setOption(const LogString& option, const LogString& value) override;
 
 		/**
-		Derived appenders should override this method if option structure
-		requires it.
+		Add \c newFilter to end of the spi::Filter chain.
 		*/
-		virtual void activateOptions(log4cxx::helpers::Pool& /* pool */) {}
-		virtual void setOption(const LogString& option, const LogString& value);
-
-		/**
-		Add a filter to end of the filter list.
-		*/
-		void addFilter(const spi::FilterPtr& newFilter) ;
+		void addFilter(const spi::FilterPtr& newFilter) override;
 
 	public:
 		/**
-		Clear the filters chain.
+		Clear the spi::Filter chain.
 		*/
-		void clearFilters();
+		void clearFilters() override;
+
+		/** \copydoc Appender::close
+		 Calling doAppend() on a closed appender generates one warning on stderr.
+		*/
+		void close() override;
 
 		/**
-		Return the currently set spi::ErrorHandler for this
-		Appender.
+		The currently set spi::ErrorHandler for this Appender.
 		*/
-		const spi::ErrorHandlerPtr& getErrorHandler() const
-		{
-			return errorHandler;
-		}
+		const spi::ErrorHandlerPtr getErrorHandler() const;
 
 		/**
-		Returns the head Filter.
+		The first spi::Filter in the filter chain for this Appender.
 		*/
-		spi::FilterPtr getFilter() const
-		{
-			return headFilter;
-		}
+		spi::FilterPtr getFilter() const override;
 
 		/**
-		Return the first filter in the filter chain for this
-		Appender. The return value may be <code>0</code> if no is
-		filter is set.
+		The first spi::Filter in the filter chain for this Appender.
 		*/
-		const spi::FilterPtr& getFirstFilter() const
-		{
-			return headFilter;
-		}
+		const spi::FilterPtr getFirstFilter() const;
 
 		/**
-		Returns the layout of this appender. The value may be 0.
+		The currently set Layout for this appender.
 		*/
-		LayoutPtr getLayout() const
-		{
-			return layout;
-		}
-
+		LayoutPtr getLayout() const override;
 
 		/**
-		Returns the name of this Appender.
+		The name of this Appender.
 		*/
-		LogString getName() const
-		{
-			return name;
-		}
+		LogString getName() const override;
 
 		/**
-		Returns this appenders threshold level. See the #setThreshold
-		method for the meaning of this option.
+		This appender's current threshold level.
+		See the #setThreshold method for the meaning of this option.
 		*/
-		const LevelPtr& getThreshold() const
-		{
-			return threshold;
-		}
+		const LevelPtr getThreshold() const;
 
 		/**
-		Check whether the message level is below the appender's
-		threshold. If there is no threshold set, then the return value is
-		always <code>true</code>.
+		Is \c level greater than or equal to this appender's threshold?
 		*/
 		bool isAsSevereAsThreshold(const LevelPtr& level) const;
 
-
 		/**
-		* This method performs threshold checks and invokes filters before
-		* delegating actual logging to the subclasses specific
-		* AppenderSkeleton#append method.
+		* Call #doAppendImpl after acquiring a lock
+		* that prevents other threads from concurrently executing #doAppendImpl.
+		*
+		* Reimplement this method in your appender if you use a different concurrency control technique.
 		* */
-		virtual void doAppend(const spi::LoggingEventPtr& event, log4cxx::helpers::Pool& pool);
+		void doAppend( const spi::LoggingEventPtr& event ) override;
 
 		/**
-		Set the {@link spi::ErrorHandler ErrorHandler} for this Appender.
+		Use \c newValue as the spi::ErrorHandler for this Appender.
 		*/
-		void setErrorHandler(const spi::ErrorHandlerPtr eh);
+		void setErrorHandler(const spi::ErrorHandlerPtr& newValue);
 
 		/**
-		Set the layout for this appender. Note that some appenders have
-		their own (fixed) layouts or do not use one. For example, the
-		{@link net::SocketAppender SocketAppender} ignores the layout set
-		here.
+		Use \c newValue as the layout for this appender.
+		Note that some appenders have
+		their own (fixed) layouts sor do not need one.
 		*/
-		void setLayout(const LayoutPtr& layout1)
-		{
-			this->layout = layout1;
-		}
+		void setLayout(const LayoutPtr& newValue) override;
 
 		/**
-		Set the name of this Appender.
+		Use \c newValue for the name of this Appender.
 		*/
-		void setName(const LogString& name1)
-		{
-			this->name.assign(name1);
-		}
+		void setName(const LogString& newValue) override;
 
 
 		/**
-		Set the threshold level. All log events with lower level
-		than the threshold level are ignored by the appender.
+		Use \c newValue as this appender's threshold level.
+		All log events with lower level
+		than the appender's threshold level are ignored by the appender.
 
-		<p>In configuration files this option is specified by setting the
+		In configuration files this option is specified by setting the
 		value of the <b>Threshold</b> option to a level
 		string, such as "DEBUG", "INFO" and so on.
+
+		The default level is "ALL", the lowest possible level,
+		meaning no event is blocked by this threshold.
 		*/
-		void setThreshold(const LevelPtr& threshold);
+		void setThreshold(const LevelPtr& newValue);
 
 }; // class AppenderSkeleton
+
+LOG4CXX_PTR_DEF(AppenderSkeleton);
 }  // namespace log4cxx
-
-#if defined(_MSC_VER)
-	#pragma warning ( pop )
-#endif
-
 
 #endif //_LOG4CXX_APPENDER_SKELETON_H

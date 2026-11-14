@@ -35,10 +35,11 @@
 #include <log4cxx/helpers/transcoder.h>
 #include <log4cxx/helpers/pool.h>
 #include <apr_strings.h>
-#include <log4cxx/helpers/pool.h>
+#include <log4cxx/helpers/loglog.h>
 #include "testchar.h"
 #include "logunit.h"
 #include <log4cxx/spi/loggerrepository.h>
+#include <log4cxx/spi/loggingevent.h>
 #include <log4cxx/helpers/stringhelper.h>
 
 
@@ -63,6 +64,9 @@ using namespace log4cxx::helpers;
 LOGUNIT_CLASS(PatternLayoutTest)
 {
 	LOGUNIT_TEST_SUITE(PatternLayoutTest);
+#if ENABLE_2GB_STRING_TESTING
+	LOGUNIT_TEST(test2GbMessageFormatting);
+#endif
 	LOGUNIT_TEST(test1);
 	LOGUNIT_TEST(test2);
 	LOGUNIT_TEST(test3);
@@ -76,8 +80,27 @@ LOGUNIT_CLASS(PatternLayoutTest)
 	LOGUNIT_TEST(test11);
 	LOGUNIT_TEST(test12);
 	LOGUNIT_TEST(test13);
+	LOGUNIT_TEST(test14);
 	LOGUNIT_TEST(testMDC1);
 	LOGUNIT_TEST(testMDC2);
+	LOGUNIT_TEST(testAbbreviateNoDots);
+	LOGUNIT_TEST(testAbbreviatePrecisionExceedsSegments);
+	LOGUNIT_TEST(testAbbreviateKeepLastTwoSegments);
+	LOGUNIT_TEST(testAbbreviateKeepLastSegmentOnly);
+	LOGUNIT_TEST(testAbbreviatePrecisionZero);
+	LOGUNIT_TEST(testAbbreviateEachSegmentToOneChar);
+	LOGUNIT_TEST(testAbbreviateEachSegmentToTwoChars);
+	LOGUNIT_TEST(testAbbreviateShortSegmentUnchanged);
+	LOGUNIT_TEST(testAbbreviateConsecutiveDots);
+	LOGUNIT_TEST(testAbbreviateLeadingDot);
+	LOGUNIT_TEST(testAbbreviateTrailingDot);
+	LOGUNIT_TEST(testAbbreviateEmptyName);
+	LOGUNIT_TEST(testAbbreviateDegenerateName);
+	LOGUNIT_TEST(testAbbreviateSegmentEqualToCharCountBoundary);
+	LOGUNIT_TEST(testAbbreviateSegmentOneCharOverBoundary);
+	LOGUNIT_TEST(testAbbreviateManySegmentsDeepHierarchy);
+	LOGUNIT_TEST(testAbbreviateLongFinalSegmentPreserved);
+	LOGUNIT_TEST(testAbbreviateIdempotentOnAlreadyAbbreviated);
 	LOGUNIT_TEST_SUITE_END();
 
 	LoggerPtr root;
@@ -94,20 +117,50 @@ public:
 	void tearDown()
 	{
 		MDC::clear();
-		log4cxx::spi::LoggerRepositoryPtr rep = root->getLoggerRepository().lock();
-		if (rep) rep->resetConfiguration();
+		auto rep = root->getLoggerRepository();
+
+		if (rep)
+		{
+			rep->resetConfiguration();
+		}
+	}
+
+	void test2GbMessageFormatting()
+	{
+		LogString msg;
+		try
+		{
+			msg.append(size_t(INT_MAX) + 1000, 'E');
+		}
+		catch (const std::exception& ex)
+		{
+			LOGLOG_DEBUG(logger, ex.what() << " - skipping 2Gb message formatting test");
+			return;
+		}
+		msg[msg.length() - 1] = 'X';
+		LogString output1;
+		PatternLayout l1{ LOG4CXX_STR("%-5p %c{2} - %.30m") };
+		l1.format(output1, std::make_shared<spi::LoggingEvent>(logger->getName(), Level::getInfo(), msg, spi::LocationInfo::getLocationUnavailable()));
+		LOGUNIT_ASSERT_EQUAL(LOG4CXX_STR("INFO  log4j.PatternLayoutTest - EEEEEEEEEEEEEEEEEEEEEEEEEEEEEX"), output1);
+
+		PatternLayout l2{ LOG4CXX_STR("%p %.30m %p") };
+		LogString output2;
+		l2.format(output2, std::make_shared<spi::LoggingEvent>(logger->getName(), Level::getDebug(), msg, spi::LocationInfo::getLocationUnavailable()));
+		LOGUNIT_ASSERT_EQUAL(LOG4CXX_STR("DEBUG EEEEEEEEEEEEEEEEEEEEEEEEEEEEEX DEBUG"), output2);
 	}
 
 	void test1()
 	{
-		PropertyConfigurator::configure(LOG4CXX_FILE("input/patternLayout1.properties"));
+		auto status = PropertyConfigurator::configure(LOG4CXX_FILE("input/patternLayout1.properties"));
+		LOGUNIT_ASSERT_EQUAL(status, spi::ConfigurationStatus::Configured);
 		common();
 		LOGUNIT_ASSERT(Compare::compare(TEMP, LOG4CXX_FILE("witness/patternLayout.1")));
 	}
 
 	void test2()
 	{
-		PropertyConfigurator::configure(LOG4CXX_FILE("input/patternLayout2.properties"));
+		auto status = PropertyConfigurator::configure(LOG4CXX_FILE("input/patternLayout2.properties"));
+		LOGUNIT_ASSERT_EQUAL(status, spi::ConfigurationStatus::Configured);
 		common();
 
 		ControlFilter filter1;
@@ -124,7 +177,7 @@ public:
 		{
 			Transformer::transform(TEMP, FILTERED, filters);
 		}
-		catch (UnexpectedFormatException& e)
+		catch (const UnexpectedFormatException& e)
 		{
 			std::cout << "UnexpectedFormatException :" << e.what() << std::endl;
 			throw;
@@ -135,7 +188,8 @@ public:
 
 	void test3()
 	{
-		PropertyConfigurator::configure(LOG4CXX_FILE("input/patternLayout3.properties"));
+		auto status = PropertyConfigurator::configure(LOG4CXX_FILE("input/patternLayout3.properties"));
+		LOGUNIT_ASSERT_EQUAL(status, spi::ConfigurationStatus::Configured);
 		common();
 
 		ControlFilter filter1;
@@ -152,7 +206,7 @@ public:
 		{
 			Transformer::transform(TEMP, FILTERED, filters);
 		}
-		catch (UnexpectedFormatException& e)
+		catch (const UnexpectedFormatException& e)
 		{
 			std::cout << "UnexpectedFormatException :" << e.what() << std::endl;
 			throw;
@@ -165,7 +219,8 @@ public:
 	// 06 avr. 2002 18:30:58,937 [12345] DEBUG atternLayoutTest - Message 0
 	void test4()
 	{
-		PropertyConfigurator::configure(LOG4CXX_FILE("input/patternLayout4.properties"));
+		auto status = PropertyConfigurator::configure(LOG4CXX_FILE("input/patternLayout4.properties"));
+		LOGUNIT_ASSERT_EQUAL(status, spi::ConfigurationStatus::Configured);
 		common();
 
 		ControlFilter filter1;
@@ -182,7 +237,7 @@ public:
 		{
 			Transformer::transform(TEMP, FILTERED, filters);
 		}
-		catch (UnexpectedFormatException& e)
+		catch (const UnexpectedFormatException& e)
 		{
 			std::cout << "UnexpectedFormatException :" << e.what() << std::endl;
 			throw;
@@ -193,7 +248,8 @@ public:
 
 	void test5()
 	{
-		PropertyConfigurator::configure(LOG4CXX_FILE("input/patternLayout5.properties"));
+		auto status = PropertyConfigurator::configure(LOG4CXX_FILE("input/patternLayout5.properties"));
+		LOGUNIT_ASSERT_EQUAL(status, spi::ConfigurationStatus::Configured);
 		common();
 
 		ControlFilter filter1;
@@ -210,7 +266,7 @@ public:
 		{
 			Transformer::transform(TEMP, FILTERED, filters);
 		}
-		catch (UnexpectedFormatException& e)
+		catch (const UnexpectedFormatException& e)
 		{
 			std::cout << "UnexpectedFormatException :" << e.what() << std::endl;
 			throw;
@@ -221,7 +277,8 @@ public:
 
 	void test6()
 	{
-		PropertyConfigurator::configure(LOG4CXX_FILE("input/patternLayout6.properties"));
+		auto status = PropertyConfigurator::configure(LOG4CXX_FILE("input/patternLayout6.properties"));
+		LOGUNIT_ASSERT_EQUAL(status, spi::ConfigurationStatus::Configured);
 		common();
 
 		ControlFilter filter1;
@@ -238,7 +295,7 @@ public:
 		{
 			Transformer::transform(TEMP, FILTERED, filters);
 		}
-		catch (UnexpectedFormatException& e)
+		catch (const UnexpectedFormatException& e)
 		{
 			std::cout << "UnexpectedFormatException :" << e.what() << std::endl;
 			throw;
@@ -249,7 +306,8 @@ public:
 
 	void test7()
 	{
-		PropertyConfigurator::configure(LOG4CXX_FILE("input/patternLayout7.properties"));
+		auto status = PropertyConfigurator::configure(LOG4CXX_FILE("input/patternLayout7.properties"));
+		LOGUNIT_ASSERT_EQUAL(status, spi::ConfigurationStatus::Configured);
 		common();
 
 		ControlFilter filter1;
@@ -266,7 +324,7 @@ public:
 		{
 			Transformer::transform(TEMP, FILTERED, filters);
 		}
-		catch (UnexpectedFormatException& e)
+		catch (const UnexpectedFormatException& e)
 		{
 			std::cout << "UnexpectedFormatException :" << e.what() << std::endl;
 			throw;
@@ -277,7 +335,8 @@ public:
 
 	void test8()
 	{
-		PropertyConfigurator::configure(LOG4CXX_FILE("input/patternLayout8.properties"));
+		auto status = PropertyConfigurator::configure(LOG4CXX_FILE("input/patternLayout8.properties"));
+		LOGUNIT_ASSERT_EQUAL(status, spi::ConfigurationStatus::Configured);
 		common();
 
 
@@ -297,7 +356,7 @@ public:
 		{
 			Transformer::transform(TEMP, FILTERED, filters);
 		}
-		catch (UnexpectedFormatException& e)
+		catch (const UnexpectedFormatException& e)
 		{
 			std::cout << "UnexpectedFormatException :" << e.what() << std::endl;
 			throw;
@@ -308,7 +367,8 @@ public:
 
 	void test9()
 	{
-		PropertyConfigurator::configure(LOG4CXX_FILE("input/patternLayout9.properties"));
+		auto status = PropertyConfigurator::configure(LOG4CXX_FILE("input/patternLayout9.properties"));
+		LOGUNIT_ASSERT_EQUAL(status, spi::ConfigurationStatus::Configured);
 		common();
 
 		ControlFilter filter1;
@@ -323,7 +383,7 @@ public:
 		{
 			Transformer::transform(TEMP, FILTERED, filters);
 		}
-		catch (UnexpectedFormatException& e)
+		catch (const UnexpectedFormatException& e)
 		{
 			std::cout << "UnexpectedFormatException :" << e.what() << std::endl;
 			throw;
@@ -334,7 +394,8 @@ public:
 
 	void test10()
 	{
-		PropertyConfigurator::configure(LOG4CXX_FILE("input/patternLayout10.properties"));
+		auto status = PropertyConfigurator::configure(LOG4CXX_FILE("input/patternLayout10.properties"));
+		LOGUNIT_ASSERT_EQUAL(status, spi::ConfigurationStatus::Configured);
 		common();
 
 		ControlFilter filter1;
@@ -355,7 +416,7 @@ public:
 		{
 			Transformer::transform(TEMP, FILTERED, filters);
 		}
-		catch (UnexpectedFormatException& e)
+		catch (const UnexpectedFormatException& e)
 		{
 			std::cout << "UnexpectedFormatException :" << e.what() << std::endl;
 			throw;
@@ -366,7 +427,8 @@ public:
 
 	void test11()
 	{
-		PropertyConfigurator::configure(LOG4CXX_FILE("input/patternLayout11.properties"));
+		auto status = PropertyConfigurator::configure(LOG4CXX_FILE("input/patternLayout11.properties"));
+		LOGUNIT_ASSERT_EQUAL(status, spi::ConfigurationStatus::Configured);
 		common();
 
 		ControlFilter filter1;
@@ -381,7 +443,7 @@ public:
 		{
 			Transformer::transform(TEMP, FILTERED, filters);
 		}
-		catch (UnexpectedFormatException& e)
+		catch (const UnexpectedFormatException& e)
 		{
 			std::cout << "UnexpectedFormatException :" << e.what() << std::endl;
 			throw;
@@ -392,7 +454,8 @@ public:
 
 	void test12()
 	{
-		PropertyConfigurator::configure(LOG4CXX_FILE("input/patternLayout12.properties"));
+		auto status = PropertyConfigurator::configure(LOG4CXX_FILE("input/patternLayout12.properties"));
+		LOGUNIT_ASSERT_EQUAL(status, spi::ConfigurationStatus::Configured);
 		common();
 
 		ControlFilter filter1;
@@ -411,7 +474,7 @@ public:
 		{
 			Transformer::transform(TEMP, FILTERED, filters);
 		}
-		catch (UnexpectedFormatException& e)
+		catch (const UnexpectedFormatException& e)
 		{
 			std::cout << "UnexpectedFormatException :" << e.what() << std::endl;
 			throw;
@@ -422,14 +485,24 @@ public:
 
 	void test13()
 	{
-		PropertyConfigurator::configure(LOG4CXX_FILE("input/patternLayout13.properties"));
+		auto status = PropertyConfigurator::configure(LOG4CXX_FILE("input/patternLayout13.properties"));
+		LOGUNIT_ASSERT_EQUAL(status, spi::ConfigurationStatus::Configured);
 		common();
 		LOGUNIT_ASSERT(Compare::compare(TEMP, LOG4CXX_FILE("witness/patternLayout.13")));
 	}
 
+	void test14()
+	{
+		auto status = PropertyConfigurator::configure(LOG4CXX_FILE("input/patternLayout14.properties"));
+		LOGUNIT_ASSERT_EQUAL(status, spi::ConfigurationStatus::Configured);
+		common();
+		LOGUNIT_ASSERT(Compare::compare(TEMP, LOG4CXX_FILE("witness/patternLayout.14")));
+	}
+
 	void testMDC1()
 	{
-		PropertyConfigurator::configure(LOG4CXX_FILE("input/patternLayout.mdc.1.properties"));
+		auto status = PropertyConfigurator::configure(LOG4CXX_FILE("input/patternLayout.mdc.1.properties"));
+		LOGUNIT_ASSERT_EQUAL(status, spi::ConfigurationStatus::Configured);
 		MDC::put(LOG4CXX_TEST_STR("key1"), LOG4CXX_TEST_STR("va11"));
 		MDC::put(LOG4CXX_TEST_STR("key2"), LOG4CXX_TEST_STR("va12"));
 		logger->debug(LOG4CXX_TEST_STR("Hello World"));
@@ -461,57 +534,407 @@ public:
 		root->debug(LOG4CXX_TEST_STR("starting mdc pattern test"));
 
 		layout->setConversionPattern(mdcMsgPattern1);
-		log4cxx::helpers::Pool pool;
-		layout->activateOptions(pool);
+		layout->activateOptions();
 		root->debug(LOG4CXX_TEST_STR("empty mdc, no key specified in pattern"));
 
 		layout->setConversionPattern(mdcMsgPattern2);
-		layout->activateOptions(pool);
+		layout->activateOptions();
 		root->debug(LOG4CXX_TEST_STR("empty mdc, key1 in pattern"));
 
 		layout->setConversionPattern(mdcMsgPattern3);
-		layout->activateOptions(pool);
+		layout->activateOptions();
 		root->debug(LOG4CXX_TEST_STR("empty mdc, key2 in pattern"));
 
 		layout->setConversionPattern(mdcMsgPattern4);
-		layout->activateOptions(pool);
+		layout->activateOptions();
 		root->debug(LOG4CXX_TEST_STR("empty mdc, key3 in pattern"));
 
 		layout->setConversionPattern(mdcMsgPattern5);
-		layout->activateOptions(pool);
+		layout->activateOptions();
 		root->debug(LOG4CXX_TEST_STR("empty mdc, key1, key2, and key3 in pattern"));
 
 		MDC::put(LOG4CXX_TEST_STR("key1"), LOG4CXX_TEST_STR("value1"));
 		MDC::put(LOG4CXX_TEST_STR("key2"), LOG4CXX_TEST_STR("value2"));
 
 		layout->setConversionPattern(mdcMsgPattern1);
-		layout->activateOptions(pool);
+		layout->activateOptions();
 		root->debug(LOG4CXX_TEST_STR("filled mdc, no key specified in pattern"));
 
 		layout->setConversionPattern(mdcMsgPattern2);
-		layout->activateOptions(pool);
+		layout->activateOptions();
 		root->debug(LOG4CXX_TEST_STR("filled mdc, key1 in pattern"));
 
 		layout->setConversionPattern(mdcMsgPattern3);
-		layout->activateOptions(pool);
+		layout->activateOptions();
 		root->debug(LOG4CXX_TEST_STR("filled mdc, key2 in pattern"));
 
 		layout->setConversionPattern(mdcMsgPattern4);
-		layout->activateOptions(pool);
+		layout->activateOptions();
 		root->debug(LOG4CXX_TEST_STR("filled mdc, key3 in pattern"));
 
 		layout->setConversionPattern(mdcMsgPattern5);
-		layout->activateOptions(pool);
+		layout->activateOptions();
 		root->debug(LOG4CXX_TEST_STR("filled mdc, key1, key2, and key3 in pattern"));
 
 		MDC::remove(LOG4CXX_TEST_STR("key1"));
 		MDC::remove(LOG4CXX_TEST_STR("key2"));
 
 		layout->setConversionPattern(LOG4CXX_STR("%m%n"));
-		layout->activateOptions(pool);
+		layout->activateOptions();
 		root->debug(LOG4CXX_TEST_STR("finished mdc pattern test"));
 
 		LOGUNIT_ASSERT(Compare::compare(OUTPUT_FILE, WITNESS_FILE));
+	}
+
+	/*
+	 * Tests for logger-name abbreviation, exercised via %c{precision} in PatternLayout.
+	 */
+
+	/**
+	 * No dots at all: name shorter than or equal to any precision should be
+	 * returned unchanged (nextDot == npos path, no truncation possible).
+	 */
+	void testAbbreviateNoDots()
+	{
+		PatternLayout layout(LOG4CXX_STR("%c{2}"));
+		auto event = std::make_shared<spi::LoggingEvent>
+			( LOG4CXX_STR("NoDotsHere")
+			, Level::getInfo()
+			, LOG4CXX_STR("msg")
+			, LOG4CXX_LOCATION
+			);
+		LogString result;
+		layout.format(result, event);
+		LOGUNIT_ASSERT_EQUAL(LogString(LOG4CXX_STR("NoDotsHere")), result);
+	}
+
+	/**
+	 * Precision larger than number of segments: entire name is preserved,
+	 * exercising the "keep trailing/last element(s) whole" path.
+	 */
+	void testAbbreviatePrecisionExceedsSegments()
+	{
+		PatternLayout layout(LOG4CXX_STR("%c{5}"));
+		auto event = std::make_shared<spi::LoggingEvent>
+			( LOG4CXX_STR("org.apache.log4cxx")
+			, Level::getInfo()
+			, LOG4CXX_STR("msg")
+			, LOG4CXX_LOCATION
+			);
+		LogString result;
+		layout.format(result, event);
+		LOGUNIT_ASSERT_EQUAL(LogString(LOG4CXX_STR("org.apache.log4cxx")), result);
+	}
+
+	/**
+	 * Standard case: precision 2 keeps the last two dotted segments and
+	 * drops the leading ones entirely (no ellipsis involved at this level).
+	 */
+	void testAbbreviateKeepLastTwoSegments()
+	{
+		PatternLayout layout(LOG4CXX_STR("%c{2}"));
+		auto event = std::make_shared<spi::LoggingEvent>
+			( LOG4CXX_STR("org.apache.log4cxx.PatternLayout")
+			, Level::getInfo()
+			, LOG4CXX_STR("msg")
+			, LOG4CXX_LOCATION
+			);
+		LogString result;
+		layout.format(result, event);
+		LOGUNIT_ASSERT_EQUAL(LogString(LOG4CXX_STR("log4cxx.PatternLayout")), result);
+	}
+
+	/**
+	 * Precision 1 keeps only the final segment; every prior segment,
+	 * however long, must be dropped by abbreviate()'s erase/rewrite step.
+	 */
+	void testAbbreviateKeepLastSegmentOnly()
+	{
+		PatternLayout layout(LOG4CXX_STR("%c{1}"));
+		auto event = std::make_shared<spi::LoggingEvent>
+			( LOG4CXX_STR("com.example.verylongcompany.module.ClassName")
+			, Level::getInfo()
+			, LOG4CXX_STR("msg")
+			, LOG4CXX_LOCATION
+			);
+		LogString result;
+		layout.format(result, event);
+		LOGUNIT_ASSERT_EQUAL(LogString(LOG4CXX_STR("ClassName")), result);
+	}
+
+	/**
+	 * Precision 0: degenerate case, only the final element remains
+	 * (mirrors log4j semantics where 0 behaves like 1 for the last element).
+	 */
+	void testAbbreviatePrecisionZero()
+	{
+		PatternLayout layout(LOG4CXX_STR("%c{0}"));
+		auto event = std::make_shared<spi::LoggingEvent>
+			( LOG4CXX_STR("a.b.c.d.Ending")
+			, Level::getInfo()
+			, LOG4CXX_STR("msg")
+			, LOG4CXX_LOCATION
+			);
+		LogString result;
+		layout.format(result, event);
+		LOGUNIT_ASSERT_EQUAL(LogString(LOG4CXX_STR("Ending")), result);
+	}
+
+	/**
+	 * Fractional / dotted-count abbreviator ("%c{1.}" family): each retained
+	 * leading segment is itself truncated to 1 character plus a trailing dot,
+	 * directly exercising the charCount/erase/insert logic inside abbreviate().
+	 */
+	void testAbbreviateEachSegmentToOneChar()
+	{
+		PatternLayout layout(LOG4CXX_STR("%c{1.}"));
+		auto event = std::make_shared<spi::LoggingEvent>
+			( LOG4CXX_STR("org.apache.log4cxx.PatternLayout")
+			, Level::getInfo()
+			, LOG4CXX_STR("msg")
+			, LOG4CXX_LOCATION
+			);
+		LogString result;
+		layout.format(result, event);
+		LOGUNIT_ASSERT_EQUAL(LogString(LOG4CXX_STR("o.a.l.PatternLayout")), result);
+	}
+
+	/**
+	 * Segment truncated to 2 characters ("%c{2.}"): checks charCount > 1
+	 * truncation path (nextDot - startPos > charCount) rather than the
+	 * charCount == 1 special case.
+	 */
+	void testAbbreviateEachSegmentToTwoChars()
+	{
+		PatternLayout layout(LOG4CXX_STR("%c{2.}"));
+		auto event = std::make_shared<spi::LoggingEvent>
+			( LOG4CXX_STR("org.apache.log4cxx.PatternLayout")
+			, Level::getInfo()
+			, LOG4CXX_STR("msg")
+			, LOG4CXX_LOCATION
+			);
+		LogString result;
+		layout.format(result, event);
+		LOGUNIT_ASSERT_EQUAL(LogString(LOG4CXX_STR("or.ap.lo.PatternLayout")), result);
+	}
+
+	/**
+	 * Segment shorter than or equal to charCount is left untouched
+	 * (the "(nextDot - startPos) > charCount" guard should skip erase/insert).
+	 */
+	void testAbbreviateShortSegmentUnchanged()
+	{
+		PatternLayout layout(LOG4CXX_STR("%c{3.}"));
+		auto event = std::make_shared<spi::LoggingEvent>
+			( LOG4CXX_STR("a.bb.ccc.LongFinalSegment")
+			, Level::getInfo()
+			, LOG4CXX_STR("msg")
+			, LOG4CXX_LOCATION
+			);
+		LogString result;
+		layout.format(result, event);
+		// "a" (1<=3), "bb" (2<=3), "ccc" (3<=3) all pass through unabbreviated
+		LOGUNIT_ASSERT_EQUAL(LogString(LOG4CXX_STR("a.bb.ccc.LongFinalSegment")), result);
+	}
+
+	/**
+	 * Consecutive dots produce a zero-length segment; abbreviate() must
+	 * not throw or corrupt the buffer, and should leave the empty
+	 * segment as-is (nextDot - startPos == 0, not > charCount).
+	 */
+	void testAbbreviateConsecutiveDots()
+	{
+		PatternLayout layout(LOG4CXX_STR("%c{1.}"));
+		auto event = std::make_shared<spi::LoggingEvent>
+			( LOG4CXX_STR("org..apache.Logger")
+			, Level::getInfo()
+			, LOG4CXX_STR("msg")
+			, LOG4CXX_LOCATION
+			);
+		LogString result;
+		layout.format(result, event);
+		LOGUNIT_ASSERT_EQUAL(LogString(LOG4CXX_STR("o..a.Logger")), result);
+	}
+
+	/**
+	 * Leading dot creates an empty first segment; verifies startPos handling
+	 * at position 0 doesn't underflow or mis-index into the buffer.
+	 */
+	void testAbbreviateLeadingDot()
+	{
+		PatternLayout layout(LOG4CXX_STR("%c{1.}"));
+		auto event = std::make_shared<spi::LoggingEvent>
+			( LOG4CXX_STR(".apache.Logger")
+			, Level::getInfo()
+			, LOG4CXX_STR("msg")
+			, LOG4CXX_LOCATION
+			);
+		LogString result;
+		layout.format(result, event);
+		LOGUNIT_ASSERT_EQUAL(LogString(LOG4CXX_STR(".a.Logger")), result);
+	}
+
+	/**
+	 * Trailing dot with nothing after it: the final "segment" after the
+	 * last dot is empty, and nextDot == npos is never reached for that
+	 * position, so the loop must still terminate correctly.
+	 */
+	void testAbbreviateTrailingDot()
+	{
+		auto event = std::make_shared<spi::LoggingEvent>
+			( LOG4CXX_STR("org.apache.")
+			, Level::getInfo()
+			, LOG4CXX_STR("msg")
+			, LOG4CXX_LOCATION
+			);
+		LogString maxElementCharCountResult;
+		PatternLayout(LOG4CXX_STR("%c{1.}")).format(maxElementCharCountResult, event);
+		LOGUNIT_ASSERT_EQUAL(LogString(LOG4CXX_STR("o.a.")), maxElementCharCountResult);
+		LogString maxElementCountResult;
+		PatternLayout(LOG4CXX_STR("%c{2}")).format(maxElementCountResult, event);
+		LOGUNIT_ASSERT_EQUAL(LogString(LOG4CXX_STR("apache.")), maxElementCountResult);
+	}
+
+	/**
+	 * Empty logger name: startPos == buf.size() from the start, find()
+	 * immediately returns npos, function must be a no-op.
+	 */
+	void testAbbreviateEmptyName()
+	{
+		auto event = std::make_shared<spi::LoggingEvent>
+			( LOG4CXX_STR("")
+			, Level::getInfo()
+			, LOG4CXX_STR("msg")
+			, LOG4CXX_LOCATION
+			);
+		LogString maxElementCountResult;
+		PatternLayout(LOG4CXX_STR("%c{2}")).format(maxElementCountResult, event);
+		LOGUNIT_ASSERT_EQUAL(LogString(LOG4CXX_STR("")), maxElementCountResult);
+		LogString maxElementCharCountResult;
+		PatternLayout(LOG4CXX_STR("%c{1.}")).format(maxElementCharCountResult, event);
+		LOGUNIT_ASSERT_EQUAL(LogString(LOG4CXX_STR("")), maxElementCharCountResult);
+	}
+
+	/**
+	 * Degenerate logger name.
+	 */
+	void testAbbreviateDegenerateName()
+	{
+		auto event = std::make_shared<spi::LoggingEvent>
+			( LOG4CXX_STR(".")
+			, Level::getInfo()
+			, LOG4CXX_STR("msg")
+			, LOG4CXX_LOCATION
+			);
+		LogString maxElementCountResult;
+		PatternLayout(LOG4CXX_STR("%c{1}")).format(maxElementCountResult, event);
+		LOGUNIT_ASSERT_EQUAL(LogString(LOG4CXX_STR(".")), maxElementCountResult);
+		LogString maxElementCharCountResult;
+		PatternLayout(LOG4CXX_STR("%c{1.}")).format(maxElementCharCountResult, event);
+		LOGUNIT_ASSERT_EQUAL(LogString(LOG4CXX_STR(".")), maxElementCharCountResult);
+	}
+
+	/**
+	 * Single-character segments equal to charCount exactly: boundary check
+	 * on "> charCount" vs ">= charCount" (should NOT truncate when equal,
+	 * since the guard is strictly "(nextDot - startPos) > charCount").
+	 */
+	void testAbbreviateSegmentEqualToCharCountBoundary()
+	{
+		PatternLayout layout(LOG4CXX_STR("%c{2.}"));
+		auto event = std::make_shared<spi::LoggingEvent>
+			( LOG4CXX_STR("ab.cd.RestOfName")
+			, Level::getInfo()
+			, LOG4CXX_STR("msg")
+			, LOG4CXX_LOCATION
+			);
+		LogString result;
+		layout.format(result, event);
+		// "ab" (len 2 == charCount 2) and "cd" (len 2 == charCount 2) both
+		// pass through untouched; only the final segment is never abbreviated.
+		LOGUNIT_ASSERT_EQUAL(LogString(LOG4CXX_STR("ab.cd.RestOfName")), result);
+	}
+
+	/**
+	 * Segment exactly one character longer than charCount: smallest case
+	 * that must actually trigger the erase/insert (or rewrite) path.
+	 */
+	void testAbbreviateSegmentOneCharOverBoundary()
+	{
+		PatternLayout layout(LOG4CXX_STR("%c{2.}"));
+		auto event = std::make_shared<spi::LoggingEvent>
+			( LOG4CXX_STR("abc.de.RestOfName")
+			, Level::getInfo()
+			, LOG4CXX_STR("msg")
+			, LOG4CXX_LOCATION
+			);
+		LogString result;
+		layout.format(result, event);
+		// "abc" (len 3 > 2) truncates to "ab"; "de" (len 2 == 2) stays whole.
+		LOGUNIT_ASSERT_EQUAL(LogString(LOG4CXX_STR("ab.de.RestOfName")), result);
+	}
+
+	/**
+	 * Many short segments (deep package hierarchy): the classic case that
+	 * exposes O(n*k) blowup in an erase/insert-per-segment implementation.
+	 */
+	void testAbbreviateManySegmentsDeepHierarchy()
+	{
+		PatternLayout layout(LOG4CXX_STR("%c{1.}"));
+		auto event = std::make_shared<spi::LoggingEvent>
+			( LOG4CXX_STR("a.b.c.d.e.f.g.h.i.j.k.l.m.n.o.p.q.r.s.t.FinalClass")
+			, Level::getInfo()
+			, LOG4CXX_STR("msg")
+			, LOG4CXX_LOCATION
+			);
+		LogString result;
+		layout.format(result, event);
+		LOGUNIT_ASSERT_EQUAL
+			( LogString(LOG4CXX_STR("a.b.c.d.e.f.g.h.i.j.k.l.m.n.o.p.q.r.s.t.FinalClass"))
+			, result
+			);
+	}
+
+	/**
+	 * Very long single final segment combined with many short leading ones:
+	 * ensures the tail (unabbreviated, no trailing dot) is copied intact
+	 * even when it is far longer than charCount, since the last element is
+	 * never subject to truncation regardless of length.
+	 */
+	void testAbbreviateLongFinalSegmentPreserved()
+	{
+		PatternLayout layout(LOG4CXX_STR("%c{1.}"));
+		auto event = std::make_shared<spi::LoggingEvent>
+			( LOG4CXX_STR("x.y.z.ThisIsAVeryLongFinalClassNameThatShouldNotBeTruncatedAtAll")
+			, Level::getInfo()
+			, LOG4CXX_STR("msg")
+			, LOG4CXX_LOCATION
+			);
+		LogString result;
+		layout.format(result, event);
+		LOGUNIT_ASSERT_EQUAL
+			( LogString(LOG4CXX_STR("x.y.z.ThisIsAVeryLongFinalClassNameThatShouldNotBeTruncatedAtAll"))
+			, result
+			);
+	}
+
+	/**
+	 * Idempotency / stability check: running the same abbreviation pattern
+	 * against an already-abbreviated name should be a no-op, since every
+	 * remaining segment is already <= charCount.
+	 */
+	void testAbbreviateIdempotentOnAlreadyAbbreviated()
+	{
+		PatternLayout layout(LOG4CXX_STR("%c{1.}"));
+		auto event = std::make_shared<spi::LoggingEvent>
+			( LOG4CXX_STR("o.a.l.PatternLayout")
+			, Level::getInfo()
+			, LOG4CXX_STR("msg")
+			, LOG4CXX_LOCATION
+			);
+		LogString result;
+		layout.format(result, event);
+		LOGUNIT_ASSERT_EQUAL(LogString(LOG4CXX_STR("o.a.l.PatternLayout")), result);
 	}
 
 	std::string createMessage(Pool & pool, int i)
@@ -550,8 +973,8 @@ private:
 
 };
 
-const LogString PatternLayoutTest::TEMP(LOG4CXX_STR("output/temp"));
-const LogString PatternLayoutTest::FILTERED(LOG4CXX_STR("output/filtered"));
+const LogString PatternLayoutTest::TEMP(LOG4CXX_STR("output/patternlayout"));
+const LogString PatternLayoutTest::FILTERED(LOG4CXX_STR("output/patternlayoutfiltered"));
 
 
 LOGUNIT_TEST_SUITE_REGISTRATION(PatternLayoutTest);

@@ -33,15 +33,14 @@
 #include <log4cxx/helpers/transcoder.h>
 #include <log4cxx/helpers/fileinputstream.h>
 
-using namespace log4cxx;
-using namespace log4cxx::helpers;
-using namespace log4cxx::spi;
-using namespace log4cxx::filter;
+using namespace LOG4CXX_NS;
+using namespace LOG4CXX_NS::helpers;
+using namespace LOG4CXX_NS::spi;
+using namespace LOG4CXX_NS::filter;
 
 IMPLEMENT_LOG4CXX_OBJECT(Object)
 IMPLEMENT_LOG4CXX_OBJECT(OptionHandler)
 IMPLEMENT_LOG4CXX_OBJECT(ErrorHandler)
-IMPLEMENT_LOG4CXX_OBJECT(Appender)
 IMPLEMENT_LOG4CXX_OBJECT(Filter)
 IMPLEMENT_LOG4CXX_OBJECT(AppenderAttachable)
 IMPLEMENT_LOG4CXX_OBJECT(LoggerFactory)
@@ -65,7 +64,7 @@ InputStreamPtr Loader::getResourceAsStream(const LogString& name)
 
 	try
 	{
-		return InputStreamPtr( new FileInputStream(name) );
+		return std::make_shared<FileInputStream>(name);
 	}
 	catch (const IOException&)
 	{

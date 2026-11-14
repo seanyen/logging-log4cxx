@@ -20,11 +20,12 @@
 #include <log4cxx/file.h>
 #include <log4cxx/logger.h>
 #include <log4cxx/propertyconfigurator.h>
+#include <log4cxx/patternlayout.h>
 #include "insertwide.h"
 #include "logunit.h"
 #include "util/compare.h"
 
-
+static log4cxx::NDC ndc("ndctest");
 
 using namespace log4cxx;
 
@@ -37,6 +38,7 @@ LOGUNIT_CLASS(NDCTestCase)
 	LOGUNIT_TEST(testPushPop);
 	LOGUNIT_TEST(test1);
 	LOGUNIT_TEST(testInherit);
+	LOGUNIT_TEST(testFieldPrecision);
 	LOGUNIT_TEST_SUITE_END();
 
 public:
@@ -47,8 +49,10 @@ public:
 
 	void tearDown()
 	{
-		log4cxx::spi::LoggerRepositoryPtr rep = logger->getLoggerRepository().lock();
-		if (rep) {
+		auto rep = logger->getLoggerRepository();
+
+		if (rep)
+		{
 			rep->resetConfiguration();
 		}
 	}
@@ -66,7 +70,8 @@ public:
 
 	void test1()
 	{
-		PropertyConfigurator::configure(File("input/ndc/NDC1.properties"));
+		auto status = PropertyConfigurator::configure(File("input/ndc/NDC1.properties"));
+		LOGUNIT_ASSERT_EQUAL(status, spi::ConfigurationStatus::Configured);
 		common();
 		LOGUNIT_ASSERT(Compare::compare(TEMP, File("witness/ndc/NDC.1")));
 	}
@@ -110,10 +115,22 @@ public:
 		LOGUNIT_ASSERT_EQUAL(expected3, NDC::pop());
 	}
 
+	/// Check NDC formatting uses to suffix when the maximum field length is exceeded.
+	void testFieldPrecision()
+	{
+		NDC item1("context1");
+		NDC item2("context2");
+		NDC item3("context3");
+		LogString output;
+		PatternLayout l{ LOG4CXX_STR("%-5p %c - %.20x %m") };
+		l.format(output, std::make_shared<spi::LoggingEvent>(LOG4CXX_STR("NDC.LayoutTest"), Level::getInfo(), LOG4CXX_STR("Message"), spi::LocationInfo::getLocationUnavailable()));
+		LOGUNIT_ASSERT_EQUAL(LOG4CXX_STR("INFO  NDC.LayoutTest - t1 context2 context3 Message"), output);
+	}
+
 };
 
 
-File NDCTestCase::TEMP("output/temp");
+File NDCTestCase::TEMP("output/ndc");
 LoggerPtr NDCTestCase::logger(Logger::getLogger("org.apache.log4j.NDCTestCase"));
 
 LOGUNIT_TEST_SUITE_REGISTRATION(NDCTestCase);

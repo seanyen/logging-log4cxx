@@ -20,22 +20,23 @@
 #include <log4cxx/level.h>
 #include <log4cxx/appender.h>
 
-using namespace log4cxx;
-using namespace log4cxx::spi;
-using namespace log4cxx::helpers;
+using namespace LOG4CXX_NS;
+using namespace LOG4CXX_NS::spi;
+using namespace LOG4CXX_NS::helpers;
 
-RootLogger::RootLogger(Pool& pool, const LevelPtr level1) :
-	Logger(pool, LOG4CXX_STR("root"))
+RootLogger::RootLogger(const LevelPtr& level1)
+	: Logger(LOG4CXX_STR("root"))
 {
 	setLevel(level1);
 }
 
-const LevelPtr RootLogger::getEffectiveLevel() const
+
+LevelPtr RootLogger::getEffectiveLevel() const
 {
-	return level;
+	return getLevel();
 }
 
-void RootLogger::setLevel(const LevelPtr level1)
+void RootLogger::setLevel(const LevelPtr& level1)
 {
 	if (level1 == 0)
 	{
@@ -43,8 +44,7 @@ void RootLogger::setLevel(const LevelPtr level1)
 	}
 	else
 	{
-
-		this->level = level1;
+		Logger::setLevel(level1);
 	}
 }
 

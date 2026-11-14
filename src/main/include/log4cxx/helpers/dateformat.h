@@ -21,10 +21,11 @@
 #include <log4cxx/helpers/timezone.h>
 
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 namespace helpers
 {
+class Pool;
 
 /**
 *  DateFormat is an abstract class for date/time formatting
@@ -45,11 +46,15 @@ class LOG4CXX_EXPORT DateFormat : public Object
 
 		/**
 		* Formats an log4cxx_time_t into a date/time string.
-		* @param s string to which the date/time string is appended.
+		* @param toAppendTo string to which the date/time string is appended.
 		* @param tm date to be formatted.
-		* @param p memory pool used during formatting.
 		*/
-		virtual void format(LogString& s, log4cxx_time_t tm, log4cxx::helpers::Pool& p) const = 0;
+		virtual void format(LogString& toAppendTo, log4cxx_time_t tm) const = 0;
+		/**
+		@deprecated Backward compatability support will be removed in a future version.
+		*/
+		[[deprecated("Use format() without a Pool parameter instead")]]
+		void format(LogString& toAppendTo, log4cxx_time_t tm, helpers::Pool& p) const;
 
 		/**
 		* Sets the time zone.
@@ -59,14 +64,17 @@ class LOG4CXX_EXPORT DateFormat : public Object
 
 		/**
 		* Format an integer consistent with the format method.
-		* @param s string to which the numeric string is appended.
+		* @param toAppendTo string to which the numeric string is appended.
 		* @param n integer value.
-		* @param p memory pool used during formatting.
 		* @remarks This method is used by CachedDateFormat to
 		* format the milliseconds.
 		*/
-		virtual void numberFormat(LogString& s, int n, log4cxx::helpers::Pool& p) const;
-
+		virtual void numberFormat(LogString& toAppendTo, int n) const;
+		/**
+		@deprecated Backward compatability support will be removed in a future version.
+		*/
+		[[deprecated("Use numberFormat() without a Pool parameter instead")]]
+		void numberFormat(LogString& toAppendTo, int n, helpers::Pool& p) const;
 
 	protected:
 		/**

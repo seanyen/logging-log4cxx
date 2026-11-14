@@ -6,7 +6,6 @@
 *.swp
 
 ar-lib
-config**
 !configuration-samples.md
 depcomp
 install-sh
@@ -20,15 +19,20 @@ pom.xml.releaseBackup
 release.properties
 
 autom4te.cache/
-src/.vs
-src/**/__history
+.idea/
+.vs/
+out/
+src/**/__history/
 src/main/cpp/.libs/
 src/main/cpp/liblog4cxx.la
 src/main/include/log4cxx/log4cxx.h
 src/main/include/log4cxx/private/log4cxx_private.h
-src/out
 src/site/doxy/Doxyfile
 src/site/doxy/manual/
+src/test/cpp/Testing/
 src/test/resources/org/
 src/test/resources/output/
 target/
+build/
+
+*.user

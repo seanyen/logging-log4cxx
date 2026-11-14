@@ -18,17 +18,12 @@
 #ifndef _LOG4CXX_SYSLOG_WRITER_H
 #define _LOG4CXX_SYSLOG_WRITER_H
 
-
 #include <log4cxx/helpers/object.h>
 #include <log4cxx/helpers/inetaddress.h>
 #include <log4cxx/helpers/datagramsocket.h>
+#include <vector>
 
-#if defined(_MSC_VER)
-	#pragma warning ( push )
-	#pragma warning ( disable: 4251 )
-#endif
-
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 namespace helpers
 {
@@ -41,19 +36,14 @@ class LOG4CXX_EXPORT SyslogWriter
 	public:
 #define SYSLOG_PORT 514
 		SyslogWriter(const LogString& syslogHost, int syslogHostPort = SYSLOG_PORT);
+		~SyslogWriter();
 		void write(const LogString& string);
 
+
 	private:
-		LogString syslogHost;
-		int syslogHostPort;
-		InetAddressPtr address;
-		DatagramSocketPtr ds;
+		LOG4CXX_DECLARE_PRIVATE_MEMBER_PTR(SyslogWriterPrivate, m_priv)
 };
 }  // namespace helpers
 } // namespace log4cxx
-
-#if defined(_MSC_VER)
-	#pragma warning (pop)
-#endif
 
 #endif

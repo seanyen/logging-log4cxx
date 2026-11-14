@@ -52,8 +52,10 @@ public:
 
 	void tearDown()
 	{
-		log4cxx::spi::LoggerRepositoryPtr rep = logger->getLoggerRepository().lock();
-		if (rep) {
+		auto rep = logger->getLoggerRepository();
+
+		if (rep)
+		{
 			rep->resetConfiguration();
 		}
 	}
@@ -72,7 +74,8 @@ public:
 		std::string fn("input/xml/customLogger");
 		fn.append(number);
 		fn.append(".xml");
-		DOMConfigurator::configure(fn);
+		auto status = DOMConfigurator::configure(fn);
+		LOGUNIT_ASSERT_EQUAL(status, spi::ConfigurationStatus::Configured);
 
 		int i = 0;
 		LOG4CXX_LOG(logger, log4cxx::XLevel::getTrace(), "Message " << i);
@@ -88,7 +91,7 @@ public:
 		i++;
 		LOG4CXX_DEBUG(logger, "Message " << i);
 
-		const File OUTPUT("output/temp");
+		const File OUTPUT("output/customlogger");
 		std::string witness("witness/customLogger.");
 		witness.append(number);
 		const File WITNESS(witness);

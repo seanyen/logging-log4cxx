@@ -27,6 +27,9 @@
 #include <log4cxx/helpers/fileoutputstream.h>
 #include <log4cxx/helpers/inputstreamreader.h>
 #include <log4cxx/helpers/fileinputstream.h>
+#include <log4cxx/helpers/loglog.h>
+#include <log4cxx/helpers/bytebuffer.h>
+#include <log4cxx/helpers/transcoder.h>
 
 #if LOG4CXX_CFSTRING_API
 	#include <CoreFoundation/CFString.h>
@@ -48,16 +51,24 @@ LOGUNIT_CLASS(FileTestCase)
 #if LOG4CXX_WCHAR_T_API
 	LOGUNIT_TEST(wcharConstructor);
 #endif
-#if LOG4CXX_UNICHAR_API
-	LOGUNIT_TEST(unicharConstructor);
-#endif
 #if LOG4CXX_CFSTRING_API
 	LOGUNIT_TEST(cfstringConstructor);
 #endif
 	LOGUNIT_TEST(copyConstructor);
 	LOGUNIT_TEST(assignment);
 	LOGUNIT_TEST(deleteBackslashedFileName);
+	LOGUNIT_TEST(testSplitMultibyteUtf8);
+	LOGUNIT_TEST(testInvalidUtf8);
 	LOGUNIT_TEST_SUITE_END();
+
+#ifdef _DEBUG
+	struct Fixture
+	{
+		Fixture() {
+			helpers::LogLog::setInternalDebugging(true);
+		}
+	} suiteFixture;
+#endif
 
 public:
 	void defaultConstructor()
@@ -71,8 +82,7 @@ public:
 	void defaultExists()
 	{
 		File defFile;
-		Pool pool;
-		bool exists = defFile.exists(pool);
+		bool exists = defFile.exists();
 		LOGUNIT_ASSERT_EQUAL(false, exists);
 	}
 
@@ -81,17 +91,18 @@ public:
 	void defaultRead()
 	{
 		File defFile;
-		Pool pool;
 
 		try
 		{
 			InputStreamPtr defInput = FileInputStreamPtr(new FileInputStream(defFile));
 			InputStreamReaderPtr inputReader = InputStreamReaderPtr(new InputStreamReader(defInput));
-			LogString contents(inputReader->read(pool));
+			LogString contents(inputReader->read());
 			LOGUNIT_ASSERT(false);
 		}
-		catch (IOException& ex)
+		catch (const IOException& ex)
 		{
+			LOG4CXX_DECODE_CHAR(msg, ex.what());
+			LogLog::debug(msg);
 		}
 	}
 
@@ -100,22 +111,7 @@ public:
 	void wcharConstructor()
 	{
 		File propFile(L"input/patternLayout1.properties");
-		Pool pool;
-		bool exists = propFile.exists(pool);
-		LOGUNIT_ASSERT_EQUAL(true, exists);
-	}
-#endif
-
-#if LOG4CXX_UNICHAR_API
-	void unicharConstructor()
-	{
-		const log4cxx::UniChar filename[] = { 'i', 'n', 'p', 'u', 't', '/',
-				'p', 'a', 't', 't', 'e', 'r', 'n', 'L', 'a', 'y', 'o', 'u', 't', '1', '.',
-				'p', 'r', 'o', 'p', 'e', 'r', 't', 'i', 'e', 's', 0
-			};
-		File propFile(filename);
-		Pool pool;
-		bool exists = propFile.exists(pool);
+		bool exists = propFile.exists();
 		LOGUNIT_ASSERT_EQUAL(true, exists);
 	}
 #endif
@@ -123,9 +119,8 @@ public:
 #if LOG4CXX_CFSTRING_API
 	void cfstringConstructor()
 	{
-		File propFile(CFSTR("input/patternLayout.properties"));
-		Pool pool;
-		bool exists = propFile.exists(pool);
+		File propFile(CFSTR("input/patternLayout1.properties"));
+		bool exists = propFile.exists();
 		LOGUNIT_ASSERT_EQUAL(true, exists);
 	}
 #endif
@@ -134,8 +129,7 @@ public:
 	{
 		File propFile("input/patternLayout1.properties");
 		File copy(propFile);
-		Pool pool;
-		bool exists = copy.exists(pool);
+		bool exists = copy.exists();
 		LOGUNIT_ASSERT_EQUAL(true, exists);
 	}
 
@@ -143,18 +137,16 @@ public:
 	{
 		File propFile("input/patternLayout1.properties");
 		File copy = propFile;
-		Pool pool;
-		bool exists = copy.exists(pool);
+		bool exists = copy.exists();
 		LOGUNIT_ASSERT_EQUAL(true, exists);
 	}
 
 	void propertyRead()
 	{
 		File propFile("input/patternLayout1.properties");
-		Pool pool;
 		InputStreamPtr propStream = FileInputStreamPtr(new FileInputStream(propFile));
 		InputStreamReaderPtr propReader = InputStreamReaderPtr(new InputStreamReader(propStream));
-		LogString props(propReader->read(pool));
+		LogString props(propReader->read());
 		LogString line1(LOG4CXX_STR("# Licensed to the Apache Software Foundation (ASF) under one or more"));
 		LOGUNIT_ASSERT_EQUAL(line1, props.substr(0, line1.length()));
 	}
@@ -162,8 +154,7 @@ public:
 	void propertyExists()
 	{
 		File propFile("input/patternLayout1.properties");
-		Pool pool;
-		bool exists = propFile.exists(pool);
+		bool exists = propFile.exists();
 		LOGUNIT_ASSERT_EQUAL(true, exists);
 	}
 
@@ -173,15 +164,14 @@ public:
 				new FileOutputStream(LOG4CXX_STR("output/fileWrite1.txt")));
 		OutputStreamWriterPtr osw = OutputStreamWriterPtr(new OutputStreamWriter(fos));
 
-		Pool pool;
 		LogString greeting(LOG4CXX_STR("Hello, World"));
 		greeting.append(LOG4CXX_EOL);
-		osw->write(greeting, pool);
+		osw->write(greeting);
 
 		InputStreamPtr is = FileInputStreamPtr(
 				new FileInputStream(LOG4CXX_STR("output/fileWrite1.txt")));
 		InputStreamReaderPtr isr = InputStreamReaderPtr(new InputStreamReader(is));
-		LogString reply = isr->read(pool);
+		LogString reply = isr->read();
 
 		LOGUNIT_ASSERT_EQUAL(greeting, reply);
 	}
@@ -193,10 +183,66 @@ public:
 	void deleteBackslashedFileName()
 	{
 		File file("output\\bogus.txt");
-		Pool pool;
-		/*bool deleted = */file.deleteFile(pool);
+		file.deleteFile();
+	}
+
+	class MockInputStream : public InputStream
+	{
+		ByteBuffer m_data;
+	public:
+		MockInputStream(const char* data, size_t charCount)
+			: m_data(const_cast<char*>(data), charCount)
+		{}
+
+		int read(ByteBuffer& dst) override
+		{
+			auto availableBytes = m_data.remaining();
+			if (availableBytes < 1)
+				return -1;
+			int count = 0;
+			for (auto p = m_data.current(); count < availableBytes && dst.put(*p); ++p)
+				++count;
+			m_data.increment_position(count);
+			return count;
+		}
+
+		void close() override {}
+	};
+
+	/**
+	 * Tests behavior when a multibyte UTF-8 sequence occurs on a read boundary
+	 */
+	void testSplitMultibyteUtf8()
+	{
+		// InputStreamReader uses a buffer of size 4096
+		std::string input( 4094, 'A' );
+		// räksmörgås.josefsson.org
+		input.append("\162\303\244\153\163\155\303\266\162\147\303\245\163\056\152\157\163\145\146\163\163\157\156\056\157\162\147");
+		InputStreamReader reader(std::make_shared<MockInputStream>(input.c_str(), input.size()), CharsetDecoder::getUTF8Decoder());
+		auto contentLS = reader.read();
+		LOG4CXX_ENCODE_CHAR(content, contentLS);
+		LOGUNIT_ASSERT_EQUAL(input, content);
+	}
+
+	/**
+	 * Tests behavior given an incomplete multibyte UTF-8 sequence in the input
+	 */
+	void testInvalidUtf8()
+	{
+		// 0xC2 is a generic start byte for a 2-byte sequence in UTF-8.
+		char input[] = { 'A', (char)0xC2, 'B', 'C', 0 };
+		InputStreamReader reader(std::make_shared<MockInputStream>(input, 4), CharsetDecoder::getUTF8Decoder());
+		try
+		{
+			reader.read();
+			LOGUNIT_ASSERT(false);
+		}
+		catch (const Exception& ex)
+		{
+			LOG4CXX_DECODE_CHAR(msg, ex.what());
+			LogLog::debug(msg);
+		}
 	}
 };
-
 
 LOGUNIT_TEST_SUITE_REGISTRATION(FileTestCase);

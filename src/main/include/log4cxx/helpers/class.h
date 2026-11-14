@@ -18,16 +18,11 @@
 #ifndef _LOG4CXX_HELPERS_CLASS_H
 #define _LOG4CXX_HELPERS_CLASS_H
 
-#if defined(_MSC_VER)
-	#pragma warning (push)
-	#pragma warning ( disable: 4231 4251 4275 4786 )
-#endif
-
-
 #include <log4cxx/logstring.h>
 #include <map>
+#include <vector>
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 namespace helpers
 {
@@ -39,9 +34,9 @@ class LOG4CXX_EXPORT Class
 	public:
 		virtual ~Class();
 		virtual Object* newInstance() const;
-		LogString toString() const;
 		virtual LogString getName() const = 0;
 		static const Class& forName(const LogString& className);
+		static auto withNameSuffix(const LogString& nameSuffix) -> std::vector<const Class*>;
 		static bool registerClass(const Class& newClass);
 
 	protected:
@@ -56,10 +51,5 @@ class LOG4CXX_EXPORT Class
 };
 }  // namespace helpers
 } // namespace log4cxx
-
-#if defined(_MSC_VER)
-	#pragma warning (pop)
-#endif
-
 
 #endif //_LOG4CXX_HELPERS_CLASS_H

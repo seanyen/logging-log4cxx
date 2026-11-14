@@ -18,19 +18,27 @@
 #include <vector>
 
 #include <log4cxx/rolling/rollingfileappender.h>
+#include <log4cxx/basicconfigurator.h>
 #include <log4cxx/logger.h>
 #include <log4cxx/consoleappender.h>
 #include <log4cxx/logmanager.h>
 #include <log4cxx/patternlayout.h>
 #include <log4cxx/rolling/timebasedrollingpolicy.h>
 #include <log4cxx/helpers/simpledateformat.h>
+#include <log4cxx/helpers/date.h>
 #include <iostream>
+#include <log4cxx/helpers/pool.h>
 #include <log4cxx/helpers/stringhelper.h>
 #include "../util/compare.h"
 #include "../logunit.h"
 
+#include <fstream>
 #include <apr_strings.h>
 #include <apr_time.h>
+#if LOG4CXX_HAS_MULTIPROCESS_ROLLING_FILE_APPENDER
+#include <apr_user.h>
+#endif
+#include <random>
 #ifndef INT64_C
 	#define INT64_C(x) x ## LL
 #endif
@@ -39,9 +47,12 @@
 // into other string literals or as an object. While macros are hard to debug, embedding into string
 // literals is easier this way, because the compiler can automatically collaps them, and if we have
 // one macro already, a second for a similar purpose shouldn't hurt as well.
-#define DATE_PATTERN        "yyyy-MM-dd_HH_mm_ss"
-#define DATE_PATTERN_STR    LogString(LOG4CXX_STR("yyyy-MM-dd_HH_mm_ss"))
-#define PATTERN_LAYOUT      LOG4CXX_STR("%c{1} - %m%n")
+#define DATE_PATTERN		"yyyy-MM-dd_HH_mm_ss"
+#define DATE_PATTERN_STR	LogString(LOG4CXX_STR("yyyy-MM-dd_HH_mm_ss"))
+#define PATTERN_LAYOUT		LOG4CXX_STR("%c{1} - %m%n")
+
+#define DIR_PRE_OUTPUT	"output/rolling/tbr-"
+#define DIR_PRE_WITNESS	"witness/rolling/tbr-"
 
 using namespace log4cxx;
 using namespace log4cxx::helpers;
@@ -76,18 +87,15 @@ LOGUNIT_CLASS(TimeBasedRollingTest)
 	LOGUNIT_TEST(test5);
 	LOGUNIT_TEST(test6);
 	LOGUNIT_TEST(test7);
+	LOGUNIT_TEST(rollIntoDir);
+#if LOG4CXX_HAS_MULTIPROCESS_ROLLING_FILE_APPENDER
+	LOGUNIT_TEST(unterminatedMultiprocessMapFile);
+#endif
 	LOGUNIT_TEST_SUITE_END();
 
 private:
-	static LoggerPtr logger;
-
-	/**
-	 * Currently running test.
-	 * <p>
-	 * Number of currently running test, used e.g. for some generic code in {@link setUp()}.
-	 * </p>
-	 */
-	size_t num_test;
+			LoggerPtr      logger;
+			log4cxx_time_t current_time;
 
 	/**
 	 * Build file names with timestamps.
@@ -111,30 +119,31 @@ private:
 	 * therefore "now" could have easily past and the first file name will never be found, because
 	 * the rolling appender creates it with a newer "now", at least one second in the future.
 	 * </p>
-	 * @param[in,out]   pool
-	 * @param[in]       prefix
-	 * @param[in]       fileNames
-	 * param[in,opt]    withCompression
-	 * param[in,opt]    startInFuture
+	 * @param[in,out]	pool
+	 * @param[in]		prefix
+	 * @param[in]		fnames
+	 * @param[in,opt]	compressed
+	 * @param[in,opt]	startInFuture
 	 */
 	template<size_t N>
-	void buildTsFileNames(          Pool &       pool,
-		const   logchar *    prefix,
-		LogString   (&fileNames)[N],
-		bool        withCompression = false,
-		bool        startInFuture   = false)
+	void buildTsFnames(
+				Pool&		pool,
+		const	LogString&	prefix,
+				LogString	(&fnames)[N],
+				bool		compressed		= false,
+				bool		startInFuture	= false)
 	{
-		SimpleDateFormat    sdf(DATE_PATTERN_STR);
-		apr_time_t          now(apr_time_now());
-		LogString           ext(withCompression ? LOG4CXX_STR(".gz") : LOG4CXX_STR(""));
+		SimpleDateFormat	sdf(DATE_PATTERN_STR);
+		log4cxx_time_t		now(current_time);
+		LogString			ext(compressed ? LOG4CXX_STR(".gz") : LOG4CXX_STR(""));
 
 		now += startInFuture ? APR_USEC_PER_SEC : 0;
 
 		for (size_t i = 0; i < N; ++i)
 		{
-			fileNames[i].assign(LogString(LOG4CXX_STR("output/")) + prefix);
-			sdf.format(fileNames[i], now, pool);
-			fileNames[i].append(ext);
+			fnames[i].assign(LogString(LOG4CXX_STR("" DIR_PRE_OUTPUT)) + prefix);
+			sdf.format(fnames[i], now);
+			fnames[i].append(ext);
 
 			now += APR_USEC_PER_SEC;
 		}
@@ -168,39 +177,43 @@ private:
 	 * We had macro wrappers around this method dealing with such things in the past, but as args
 	 * where added, those become more and more difficult to maintain properly and therefore removed.
 	 * </p>
-	 * @param[in,out]   pool
-	 * @param[in]       howOften
-	 * @param[in]       srcFunc
-	 * @param[in]       srcLine
-	 * @param[in,opt]   startWith
-	 * @param[in]       waitFactor
+	 * @param[in,out]	pool
+	 * @param[in]		howOften
+	 * @param[in]		srcFunc
+	 * @param[in]		srcLine
+	 * @param[in,opt]	startWith
+	 * @param[in]		waitFactor
 	 */
-	void logMsgAndSleep(Pool &       pool,
-		size_t      howOften,
-		std::string srcFunc,
-		size_t      srcLine,
-		size_t      startWith   = 0,
-		float       waitFactor  = 0.5)
+	void logMsgAndSleep
+		( Pool&              pool
+		, int                howOften
+		, const std::string& srcFunc
+		, int                srcLine
+		, int                startWith = 0
+		, float              waitFactor = 0.5
+		)
 	{
 #undef  LOG4CXX_LOCATION
-#define LOG4CXX_LOCATION ::log4cxx::spi::LocationInfo(  \
-	__FILE__,                   \
-	srcFunc.c_str(),            \
+#define LOG4CXX_LOCATION ::log4cxx::spi::LocationInfo( \
+	__FILE__,			\
+	__FILE__,			\
+	srcFunc.c_str(),	\
 	srcLine)
 
-		for (size_t i = startWith; i < startWith + howOften; ++i)
+		for (int i = startWith; i < startWith + howOften; ++i)
 		{
 			std::string message("Hello---");
 			message.append(pool.itoa(i));
 
 			LOG4CXX_DEBUG(logger, message);
-			apr_sleep(APR_USEC_PER_SEC * waitFactor);
+			current_time += int(APR_USEC_PER_SEC * waitFactor);
 		}
 
 #undef  LOG4CXX_LOCATION
-#define LOG4CXX_LOCATION ::log4cxx::spi::LocationInfo(  \
-	__FILE__,                   \
-	__LOG4CXX_FUNC__,           \
+#define LOG4CXX_LOCATION ::log4cxx::spi::LocationInfo( \
+	__FILE__,			\
+	__FILE__,			\
+	__LOG4CXX_FUNC__,	\
 	__LINE__)
 	}
 
@@ -216,23 +229,27 @@ private:
 	 * We don't use a wrapper macro this time because the src line should have the same name in all
 	 * compilers and is easily to add for the caller.
 	 * </p>
-	 * @param[in,out]   pool
-	 * @param[in]       prefix
-	 * @param[in]       fileName
-	 * @param[in]       witnessIdx
-	 * @param[in]       srcLine
+	 * @param[in,out] pool
+	 * @param[in]     prefix
+	 * @param[in]     fname
+	 * @param[in]     witnessIdx
+	 * @param[in]     srcLine
 	 */
-	void compareWitness(        Pool &       pool,
-		const   logchar *    prefix,
-		const   LogString &  fileName,
-		size_t      witnessIdx,
-		size_t      srcLine)
+	void compareWitness
+			( Pool&	           pool
+			, const LogString& prefix
+			, const LogString& fname
+			, int              witnessIdx
+			, int              srcLine
+			)
 	{
-		LogString   witness(LOG4CXX_STR("witness/rolling/tbr-"));
+		LogString witness(LOG4CXX_STR("" DIR_PRE_WITNESS));
 		witness.append(prefix);
+		StringHelper::toString(witnessIdx, witness);
 
-		StringHelper::toString(witnessIdx, pool, witness);
-		LOGUNIT_ASSERT_SRCL(Compare::compare(fileName, File(witness)), srcLine);
+		//std::wcerr << L"Comparing file:    " << fname	<< L"\n";
+		//std::wcerr << L"Comparing witness: " << witness	<< L"\n";
+		LOGUNIT_ASSERT_SRCL(Compare::compare(fname, File(witness)), srcLine);
 	}
 
 	/**
@@ -241,20 +258,24 @@ private:
 	 * This method is a wrapper around {@link compareWitness}, used to iterate over all files from a
 	 * given test.
 	 * </p>
-	 * @param[in,out]   pool
-	 * @param[in]       prefix
-	 * @param[in]       fileNames
-	 * @param[in]       srcLine
+	 * @param[in,out] pool
+	 * @param[in]     prefix
+	 * @param[in]     fnames
+	 * @param[in]     srcLine
+	 * @param[in]	  startingAt
 	 */
 	template<size_t N>
-	void compareWitnesses(          Pool &       pool,
-		const   logchar *    prefix,
-		LogString   (&fileNames)[N],
-		size_t      srcLine)
+	void compareWitnesses
+	    ( Pool&            pool
+		, const LogString& prefix
+		, const LogString (&fnames)[N]
+		, int              srcLine
+		, int		       startingAt = 0
+	)
 	{
-		for (int i = 0; i < N; ++i)
+		for (int i = startingAt; i < int(N); ++i)
 		{
-			this->compareWitness(pool, prefix, fileNames[i], i, srcLine);
+			this->compareWitness(pool, prefix, fnames[i], int(i), srcLine);
 		}
 	}
 
@@ -265,26 +286,36 @@ private:
 	 * the last one by content to some witness.
 	 * </p>
 	 * <p>
-	 * We don't use a wrapper macro this time because the src line schould have the same name in all
+	 * We don't use a wrapper macro this time because the src line should have the same name in all
 	 * compilers and is easily to add for the caller.
 	 * </p>
-	 * @param[in,out]   pool
-	 * @param[in]       prefix
-	 * @param[in]       fileNames
-	 * @param[in]       srcLine
+	 * @param[in,out]	pool
+	 * @param[in]		prefix
+	 * @param[in]		fnames
+	 * @param[in]		witnessIdx
+	 * @param[in]		srcLine
+	 * @param[in]		startingAt
 	 */
 	template<size_t N>
-	void checkFilesExist(           Pool &       pool,
-		const   logchar *    prefix,
-		LogString   (&fileNames)[N],
-		size_t      srcLine)
+	void checkFilesExist
+		( Pool&            pool
+		, const	LogString& prefix
+		, const LogString  (&fnames)[N]
+		, int              witnessIdx
+		, int              srcLine
+		, int		       startingAt = 0
+		)
 	{
-		for (int i = 0; i < N - 1; ++i)
+		for (int i = startingAt; i < int(N) - 1; ++i)
 		{
-			LOGUNIT_ASSERT_EQUAL_SRCL(true, File(fileNames[0]).exists(pool), srcLine);
+			//std::wcerr << L"Check: " << fnames[i] << L"\n";
+			LOGUNIT_ASSERT_EQUAL_SRCL(true, File(fnames[i]).exists(), srcLine);
 		}
 
-		this->compareWitness(pool, prefix, fileNames[N - 1], N - 1, srcLine);
+		if (witnessIdx >= startingAt)
+		{
+			this->compareWitness(pool, prefix, fnames[witnessIdx], witnessIdx, srcLine);
+		}
 	}
 
 	/**
@@ -295,12 +326,9 @@ private:
 	 * </p>
 	 * @param[in,opt] millis
 	 */
-	void delayUntilNextSecond(size_t millis = 100)
+	void delayUntilNextSecond()
 	{
-		apr_time_t now  = apr_time_now();
-		apr_time_t next = ((now / APR_USEC_PER_SEC) + 1) * APR_USEC_PER_SEC + millis * 1000L;
-
-		apr_sleep(next - now);
+		current_time += APR_USEC_PER_SEC;
 	}
 
 	/**
@@ -311,293 +339,303 @@ private:
 	 * </p>
 	 * @param[in,opt] millis
 	 */
-	void delayUntilNextSecondWithMsg(size_t millis = 100)
+	void delayUntilNextSecondWithMsg()
 	{
-		std::cout << "Waiting until next second and " << millis << " millis.";
-		delayUntilNextSecond(millis);
-		std::cout << "Done waiting." << std::endl;
+		std::cout << "Advancing one second\n";
+		delayUntilNextSecond();
 	}
 
 	/**
-	 * Delete generic log files.
+	 * Delete generic log file.
 	 * <p>
 	 * Some tests use generic log file names which may already be available during subsequent calls
 	 * to the test and influence their behavior, e.g. because RollingFileAppender uses the last
-	 * modification time of already existing files to create their internal names. Such a date may
-	 * be from the arbitrary past, but ost of the test assumes operations like rollovers within few
-	 * seconds around "new". Thos assumptions will fail for older existing files. So this method can
-	 * be called during {@link setUp()} of an test to clear such generically named files for each
-	 * test. We currently only care about {@code output/testxy.log}.
+	 * modification time of already existing files to create its internal name. Such a date might be
+	 * from the arbitrary past, but most of the tests assume operations like rollovers within a few
+	 * seconds around "new". Those assumptions will fail for older existing files. This method can
+	 * be used to delete those files, while documenting the problem at the same time.
 	 * </p>
-	 * @param[in] num_test
+	 * @param[in,out]	pool
+	 * @param[in]		path
 	 */
-	void deleteGenericLogFilePerTest(size_t num_test)
+	void delGenericLogFile(
+			Pool&		pool,
+			LogString	path)
 	{
-		Pool        pool;
-		LogString   path(LOG4CXX_STR("output/test"));
-
-		StringHelper::toString(num_test, pool, path);
-		path.append(LOG4CXX_STR(".log"));
-
-		File(path).deleteFile(pool);
+		File(path).deleteFile();
 	}
 
 	/**
-	 * Setup for internal test call.
+	 * Set the current time for each individual test methhod run.
 	 * <p>
-	 * This method has a similar intention like {@link setUp()}, only that it focusses on internal
-	 * calls of the tests, where we don't need to create some loggers and such, but may need to
-	 * delete some files etc. to make tests work.
-	 * </p>
-	 * @param[in] num_test
-	 */
-	void internalSetUp(size_t num_test)
-	{
-		this->deleteGenericLogFilePerTest(num_test);
-	}
-
-	/**
-	 * Counterpart for {@like internalSetUp(size_t)}.
-	 * <p>
-	 * Counterpart for {@like internalSetUp(size_t)}.
+	 * There's at least one test running multiple other tests WITHIN the same lifecycle of
+	 * {@code setUp} and {@code tearDown}, but each of the test methods need the same current time
+	 * to start with. So this method can be used to set that and is simply used by {@code setUp}
+	 * as well.
 	 * </p>
 	 */
-	void internalTearDown()
+	void setUpCurrTime()
 	{
-		// Nothing to do currently.
+		//current_time = log4cxx::helpers::Date::currentTime(); // Start at "about" now.
+		//current_time -= (current_time % APR_USEC_PER_SEC); // Go to the top of the second
+		//current_time++; // Need to not be at the top of a second for rollover logic to work correctly
+		current_time = 1; // Start at about unix epoch
 	}
 
 public:
-	/**
-	 * Extract number of current test.
-	 * <p>
-	 * {@code setUp()} needs the number of the current runnign test for some generic work and this
-	 * is the only place where we can extract and save it in the instance.
-	 * </p>
-	 */
-	void setCase(abts_case * tc)
+	log4cxx_time_t currentTime()
 	{
-		LogUnit::TestFixture::setCase(tc);
-		this->num_test = tc->suite->num_test;
+		return current_time;
 	}
 
 	void setUp()
 	{
-		LoggerPtr root(Logger::getRootLogger());
-		root->addAppender(
-			ConsoleAppenderPtr(new ConsoleAppender(
-					PatternLayoutPtr(new PatternLayout(
-							LOG4CXX_STR("%d{ABSOLUTE} [%t] %level %c{2}#%M:%L - %m%n"))))));
-		this->internalSetUp(this->num_test);
+		BasicConfigurator::configure(std::make_shared<PatternLayout> (
+			LOG4CXX_STR("%d{ABSOLUTE} [%t] %level %c{2}#%M:%L - %m%n")
+		));
+		this->logger = LogManager::getLogger("org.apache.log4j.TimeBasedRollingTest");
+		this->setUpCurrTime();
+		helpers::Date::setGetCurrentTimeFunction( std::bind( &TimeBasedRollingTest::currentTime, this ) );
 	}
 
 	void tearDown()
 	{
-		this->internalTearDown();
+		helpers::Date::setGetCurrentTimeFunction(&Date::getCurrentTimeStd);
 		LogManager::shutdown();
 	}
 
 	/**
-	 * Test rolling without compression, activeFileName left blank, no stop/start
+	 * Test rolling without compression, activeFileName left blank, no stop/start.
 	 */
 	void test1()
 	{
-		Pool        pool;
-		const   size_t      nrOfFileNames = 4;
-		LogString   fileNames[nrOfFileNames];
+		const int nrOfFnames(4);
+		LogString fnames[nrOfFnames];
 
-		PatternLayoutPtr        layout( new PatternLayout(PATTERN_LAYOUT));
-		RollingFileAppenderPtr  rfa(    new RollingFileAppender());
+		PatternLayoutPtr		layout(	new PatternLayout(PATTERN_LAYOUT));
+		RollingFileAppenderPtr	rfa(	new RollingFileAppender());
+		rfa->setAppend(false);
 		rfa->setLayout(layout);
 
 		TimeBasedRollingPolicyPtr tbrp(new TimeBasedRollingPolicy());
-		tbrp->setFileNamePattern(LOG4CXX_STR("output/test1-%d{" DATE_PATTERN "}"));
-		tbrp->activateOptions(pool);
+		tbrp->setFileNamePattern(LOG4CXX_STR("" DIR_PRE_OUTPUT "test1-%d{" DATE_PATTERN "}"));
+		tbrp->activateOptions();
 		rfa->setRollingPolicy(tbrp);
-		rfa->activateOptions(pool);
+		rfa->activateOptions();
 		logger->addAppender(rfa);
 
-		this->buildTsFileNames(pool, LOG4CXX_STR("test1-"), fileNames);
+		Pool      pool;
+		this->buildTsFnames<4>(pool, LOG4CXX_STR("test1-"), fnames);
 		this->delayUntilNextSecondWithMsg();
-		this->logMsgAndSleep(   pool, nrOfFileNames + 1, __LOG4CXX_FUNC__, __LINE__);
-		this->compareWitnesses( pool, LOG4CXX_STR("test1."), fileNames, __LINE__);
+		this->logMsgAndSleep(	pool, nrOfFnames + 1, __LOG4CXX_FUNC__, __LINE__);
+		// Nothing was logged to fnames[0] and since file creation
+		// is lazy the file doesn't exist.
+		this->compareWitnesses<4>(	pool, LOG4CXX_STR("test1."), fnames, __LINE__, 1);
 	}
 
+
 	/**
-	 * No compression, with stop/restart, activeFileName left blank
+	 * No compression, with stop/restart, activeFileName left blank.
 	 */
 	void test2()
 	{
-		Pool        pool;
-		const   size_t      nrOfFileNames = 4;
-		LogString   fileNames[nrOfFileNames];
+		const int nrOfFnames(4);
+		LogString fnames[nrOfFnames];
 
-		PatternLayoutPtr        layout1(new PatternLayout(PATTERN_LAYOUT));
-		RollingFileAppenderPtr  rfa1(   new RollingFileAppender());
+		PatternLayoutPtr		layout1(new PatternLayout(PATTERN_LAYOUT));
+		RollingFileAppenderPtr	rfa1(	new RollingFileAppender());
+		rfa1->setAppend(false);
 		rfa1->setLayout(layout1);
 
 		TimeBasedRollingPolicyPtr tbrp1(new TimeBasedRollingPolicy());
-		tbrp1->setFileNamePattern(LOG4CXX_STR("output/test2-%d{" DATE_PATTERN "}"));
-		tbrp1->activateOptions(pool);
+		tbrp1->setFileNamePattern(LOG4CXX_STR("" DIR_PRE_OUTPUT "test2-%d{" DATE_PATTERN "}"));
+		tbrp1->activateOptions();
 		rfa1->setRollingPolicy(tbrp1);
-		rfa1->activateOptions(pool);
+		rfa1->activateOptions();
 		logger->addAppender(rfa1);
 
-		this->buildTsFileNames(pool, LOG4CXX_STR("test2-"), fileNames);
+		Pool      pool;
+		this->buildTsFnames<4>(pool, LOG4CXX_STR("test2-"), fnames);
 		this->delayUntilNextSecondWithMsg();
 		this->logMsgAndSleep(pool, 3, __LOG4CXX_FUNC__, __LINE__);
 
-		logger->removeAppender(rfa1);
+		LOGUNIT_ASSERT(logger->removeAppender(rfa1));
 		rfa1->close();
 
-		PatternLayoutPtr        layout2(new PatternLayout(PATTERN_LAYOUT));
-		RollingFileAppenderPtr  rfa2(   new RollingFileAppender());
+		PatternLayoutPtr		layout2(new PatternLayout(PATTERN_LAYOUT));
+		RollingFileAppenderPtr	rfa2(	new RollingFileAppender());
 		rfa2->setLayout(layout2);
 
 		TimeBasedRollingPolicyPtr tbrp2 = TimeBasedRollingPolicyPtr(new TimeBasedRollingPolicy());
-		tbrp2->setFileNamePattern(LOG4CXX_STR("output/test2-%d{" DATE_PATTERN "}"));
-		tbrp2->activateOptions(pool);
+		tbrp2->setFileNamePattern(LOG4CXX_STR("" DIR_PRE_OUTPUT "test2-%d{" DATE_PATTERN "}"));
+		tbrp2->activateOptions();
 		rfa2->setRollingPolicy(tbrp2);
-		rfa2->activateOptions(pool);
+		rfa2->activateOptions();
+		rfa2->setAppend(false);
 		logger->addAppender(rfa2);
 
-		this->logMsgAndSleep(   pool, 2, __LOG4CXX_FUNC__, __LINE__, 3);
-		this->compareWitnesses( pool, LOG4CXX_STR("test2."), fileNames, __LINE__);
+		this->logMsgAndSleep(	pool, 2, __LOG4CXX_FUNC__, __LINE__, 3);
+		// Nothing was logged to fnames[0] and since file creation
+		// is lazy the file doesn't exist.
+		this->compareWitnesses<4>(	pool, LOG4CXX_STR("test2."), fnames, __LINE__, 1);
 	}
 
+
 	/**
-	 * With compression, activeFileName left blank, no stop/restart
+	 * With compression, activeFileName left blank, no stop/restart.
 	 */
 	void test3()
 	{
-		Pool        pool;
-		const   size_t      nrOfFileNames = 4;
-		LogString   fileNames[nrOfFileNames];
+		const int nrOfFnames(4);
+		LogString fnames[nrOfFnames];
 
-		PatternLayoutPtr        layout( new PatternLayout(PATTERN_LAYOUT));
-		RollingFileAppenderPtr  rfa(    new RollingFileAppender());
+		PatternLayoutPtr		layout(	new PatternLayout(PATTERN_LAYOUT));
+		RollingFileAppenderPtr	rfa(	new RollingFileAppender());
 		rfa->setAppend(false);
 		rfa->setLayout(layout);
 
 		TimeBasedRollingPolicyPtr tbrp = TimeBasedRollingPolicyPtr(new TimeBasedRollingPolicy());
-		tbrp->setFileNamePattern(LogString(LOG4CXX_STR("output/test3-%d{" DATE_PATTERN "}.gz")));
-		tbrp->activateOptions(pool);
+		tbrp->setFileNamePattern(LogString(LOG4CXX_STR("" DIR_PRE_OUTPUT "test3-%d{" DATE_PATTERN "}.gz")));
+		tbrp->activateOptions();
 		rfa->setRollingPolicy(tbrp);
-		rfa->activateOptions(pool);
+		rfa->activateOptions();
 		logger->addAppender(rfa);
 
-		this->buildTsFileNames(pool, LOG4CXX_STR("test3-"), fileNames, true);
-		fileNames[3].resize(fileNames[3].size() - 3);
+		Pool pool;
+		this->buildTsFnames<4>(pool, LOG4CXX_STR("test3-"), fnames, true);
+		fnames[nrOfFnames - 1].resize(fnames[nrOfFnames - 1].size() - 3);
 		this->delayUntilNextSecondWithMsg();
-		this->logMsgAndSleep(   pool, nrOfFileNames + 1, __LOG4CXX_FUNC__, __LINE__);
-		this->checkFilesExist(  pool, LOG4CXX_STR("test3."), fileNames, __LINE__);
+		this->logMsgAndSleep(	pool, nrOfFnames + 1, __LOG4CXX_FUNC__, __LINE__);
+		// Nothing was logged to fnames[0] and since file creation
+		// is lazy the file doesn't exist.
+		this->checkFilesExist<4>(	pool, LOG4CXX_STR("test3."), fnames, nrOfFnames - 1, __LINE__, 1);
 	}
 
 	/**
 	 * Without compression, activeFileName set,  with stop/restart
+	 *
+	 * Note: because this test stops and restarts, it is not possible to use the
+	 * date pattern in the filenames, as log4cxx will use the file's last modified
+	 * time when rolling over and determining the new filename.
 	 */
 	void test4()
 	{
-		Pool        pool;
-		const   size_t      nrOfFileNames = 4;
-		LogString   fileNames[nrOfFileNames];
+		const int nrOfFnames(4);
+		const int nrOfLogMsgs(((nrOfFnames - 1) * 2) - 1);
+		LogString fnames[nrOfFnames];
 
-		PatternLayoutPtr        layout1(new PatternLayout(PATTERN_LAYOUT));
-		RollingFileAppenderPtr  rfa1(   new RollingFileAppender());
+		PatternLayoutPtr		layout1(new PatternLayout(PATTERN_LAYOUT));
+		RollingFileAppenderPtr	rfa1(	new RollingFileAppender());
 		rfa1->setLayout(layout1);
 
 		TimeBasedRollingPolicyPtr tbrp1 = TimeBasedRollingPolicyPtr(new TimeBasedRollingPolicy());
-		rfa1->setFile(LOG4CXX_STR("output/test4.log"));
-		tbrp1->setFileNamePattern(LOG4CXX_STR("output/test4-%d{" DATE_PATTERN "}"));
-		tbrp1->activateOptions(pool);
+		tbrp1->setFileNamePattern(LOG4CXX_STR("" DIR_PRE_OUTPUT "test4-%d{" DATE_PATTERN "}"));
+		tbrp1->activateOptions();
+		rfa1->setFile(LOG4CXX_STR("" DIR_PRE_OUTPUT "test4.log"));
 		rfa1->setRollingPolicy(tbrp1);
-		rfa1->activateOptions(pool);
+		rfa1->activateOptions();
 		logger->addAppender(rfa1);
 
-		this->buildTsFileNames(pool, LOG4CXX_STR("test4-"), fileNames);
-		fileNames[3].assign(rfa1->getFile());
+		Pool pool;
+		this->delGenericLogFile(pool, rfa1->getFile());
+		this->buildTsFnames<4>(pool, LOG4CXX_STR("test4-"), fnames);
+		fnames[0].assign(rfa1->getFile());
 		this->delayUntilNextSecondWithMsg();
-		this->logMsgAndSleep(pool, 3, __LOG4CXX_FUNC__, __LINE__);
+		this->logMsgAndSleep(pool, nrOfLogMsgs, __LOG4CXX_FUNC__, __LINE__);
 
-		logger->removeAppender(rfa1);
+		LOGUNIT_ASSERT(logger->removeAppender(rfa1));
 		rfa1->close();
 
 		PatternLayoutPtr        layout2(new PatternLayout(PATTERN_LAYOUT));
-		RollingFileAppenderPtr  rfa2(   new RollingFileAppender());
+		RollingFileAppenderPtr rfa2(	new RollingFileAppender());
 		rfa2->setLayout(layout2);
 
 		TimeBasedRollingPolicyPtr tbrp2 = TimeBasedRollingPolicyPtr(new TimeBasedRollingPolicy());
-		tbrp2->setFileNamePattern(LOG4CXX_STR("output/test4-%d{" DATE_PATTERN "}"));
-		rfa2->setFile(fileNames[3]);
-		tbrp2->activateOptions(pool);
+		tbrp2->setFileNamePattern(LOG4CXX_STR("" DIR_PRE_OUTPUT "test4-%d{" DATE_PATTERN "}"));
+		tbrp2->activateOptions();
+		rfa2->setFile(rfa1->getFile());
 		rfa2->setRollingPolicy(tbrp2);
-		rfa2->activateOptions(pool);
+		rfa2->activateOptions();
 		logger->addAppender(rfa2);
 
-		this->logMsgAndSleep(   pool, 2, __LOG4CXX_FUNC__, __LINE__, 3);
-		this->compareWitnesses( pool, LOG4CXX_STR("test4."), fileNames, __LINE__);
+		// The one file not checked is the active file from the old appender reused by the new one
+		// and rolled over afterwards. The problem is that because the reused file exists already,
+		// it doesn't get an expected fname, but the last write time instead. Though, should be safe
+		// enough to not check that special file.
+		this->logMsgAndSleep(pool, 2, __LOG4CXX_FUNC__, __LINE__, nrOfLogMsgs);
+		this->compareWitness(pool, LOG4CXX_STR("test4."), fnames[0], 0, __LINE__);
+		this->compareWitness(pool, LOG4CXX_STR("test4."), fnames[1], 1, __LINE__);
+		this->compareWitness(pool, LOG4CXX_STR("test4."), fnames[2], 2, __LINE__);
 	}
 
 	/**
-	 * No compression, activeFileName set,  without stop/restart
+	 * No compression, activeFileName set, without stop/restart.
 	 */
 	void test5()
 	{
-		Pool        pool;
-		const   size_t      nrOfFileNames = 4;
-		LogString   fileNames[nrOfFileNames];
+		const int nrOfFnames(4);
+		const int nrOfLogMsgs((nrOfFnames * 2) - 1);
+		LogString fnames[nrOfFnames];
 
-		PatternLayoutPtr        layout( new PatternLayout(PATTERN_LAYOUT));
-		RollingFileAppenderPtr  rfa(    new RollingFileAppender());
+		PatternLayoutPtr       layout(new PatternLayout(PATTERN_LAYOUT));
+		RollingFileAppenderPtr rfa(new RollingFileAppender());
 		rfa->setLayout(layout);
 
 		TimeBasedRollingPolicyPtr tbrp = TimeBasedRollingPolicyPtr(new TimeBasedRollingPolicy());
-		tbrp->setFileNamePattern(LOG4CXX_STR("output/test5-%d{" DATE_PATTERN "}"));
-		rfa->setFile(LOG4CXX_STR("output/test5.log"));
+		tbrp->setFileNamePattern(LOG4CXX_STR("" DIR_PRE_OUTPUT "test5-%d{" DATE_PATTERN "}"));
+		rfa->setFile(LOG4CXX_STR("" DIR_PRE_OUTPUT "test5.log"));
 
-		tbrp->activateOptions(pool);
+		tbrp->activateOptions();
 		rfa->setRollingPolicy(tbrp);
-		rfa->activateOptions(pool);
+		rfa->activateOptions();
 		logger->addAppender(rfa);
 
-		this->buildTsFileNames(pool, LOG4CXX_STR("test5-"), fileNames);
-		fileNames[3].assign(rfa->getFile());
+		Pool pool;
+		this->delGenericLogFile(pool, rfa->getFile());
+		this->buildTsFnames<4>(pool, LOG4CXX_STR("test5-"), fnames);
+		fnames[0].assign(rfa->getFile());
+
 		this->delayUntilNextSecondWithMsg();
-		this->logMsgAndSleep(   pool, nrOfFileNames + 1, __LOG4CXX_FUNC__, __LINE__);
-		this->compareWitnesses( pool, LOG4CXX_STR("test5."), fileNames, __LINE__);
+		this->logMsgAndSleep(	pool, nrOfLogMsgs, __LOG4CXX_FUNC__, __LINE__);
+		// Nothing was logged to fnames[0] and since file creation
+		// is lazy the file doesn't exist.
+		this->compareWitnesses<4>(	pool, LOG4CXX_STR("test5."), fnames, __LINE__, 1);
 	}
 
 	/**
-	 * With compression, activeFileName set, no stop/restart,
+	 * With compression, activeFileName set, no stop/restart.
 	 */
 	void test6()
 	{
-		Pool        pool;
-		const   size_t      nrOfFileNames = 4;
-		LogString   fileNames[nrOfFileNames];
+		const int nrOfFnames(4);
+		const int nrOfLogMsgs((nrOfFnames * 2) - 1);
+		LogString fnames[nrOfFnames];
 
-		PatternLayoutPtr        layout( new PatternLayout(PATTERN_LAYOUT));
-		RollingFileAppenderPtr  rfa(    new RollingFileAppender());
+		PatternLayoutPtr       layout(	new PatternLayout(PATTERN_LAYOUT));
+		RollingFileAppenderPtr rfa(	new RollingFileAppender());
 		rfa->setAppend(false);
 		rfa->setLayout(layout);
 
 		TimeBasedRollingPolicyPtr tbrp = TimeBasedRollingPolicyPtr(new TimeBasedRollingPolicy());
-		tbrp->setFileNamePattern(LogString(LOG4CXX_STR("output/test6-%d{" DATE_PATTERN "}.gz")));
-		rfa->setFile(LOG4CXX_STR("output/test6.log"));
-		tbrp->activateOptions(pool);
+		tbrp->setFileNamePattern(LogString(LOG4CXX_STR("" DIR_PRE_OUTPUT "test6-%d{" DATE_PATTERN "}.gz")));
+		rfa->setFile(LOG4CXX_STR("" DIR_PRE_OUTPUT "test6.log"));
+		tbrp->activateOptions();
 		rfa->setRollingPolicy(tbrp);
-		rfa->activateOptions(pool);
+		rfa->activateOptions();
 		logger->addAppender(rfa);
 
-		this->buildTsFileNames(pool, LOG4CXX_STR("test6-"), fileNames, true);
-		fileNames[3].assign(rfa->getFile());
+		Pool pool;
+		this->delGenericLogFile(pool, rfa->getFile());
+		this->buildTsFnames<4>(pool, LOG4CXX_STR("test6-"), fnames, true);
+		fnames[0].assign(rfa->getFile());
+
 		this->delayUntilNextSecondWithMsg();
-		this->logMsgAndSleep(   pool, nrOfFileNames + 1, __LOG4CXX_FUNC__, __LINE__);
-		this->checkFilesExist(  pool, LOG4CXX_STR("test6."), fileNames, __LINE__);
+		this->logMsgAndSleep(	pool, nrOfLogMsgs, __LOG4CXX_FUNC__, __LINE__);
+		this->checkFilesExist(	pool, LOG4CXX_STR("test6."), fnames, 0, __LINE__);
 	}
 
 	/**
-	 * Repeat some test with generic file name.s
+	 * Repeat some tests with generic file names.
 	 * <p>
 	 * This test calls some tests which use generic file names and will only work properly if those
 	 * got deleted before running the test during setup.
@@ -608,29 +646,120 @@ public:
 		typedef void (TimeBasedRollingTest::*Test)();
 		typedef std::vector<Test> Tests;
 
-		Tests   tests(10);
-		size_t  numTest = 0;
+		Tests	tests(10);
 
 		tests.at(4) = &TimeBasedRollingTest::test4;
 		tests.at(5) = &TimeBasedRollingTest::test5;
 		tests.at(6) = &TimeBasedRollingTest::test6;
 
-		for (size_t numTest = 1; numTest < tests.size(); ++numTest)
+		for (int numTest = 1; numTest < tests.size(); ++numTest)
 		{
 			Test test(tests.at(numTest));
-
 			if (!test)
 			{
 				continue;
 			}
 
-			this->internalSetUp(numTest);
+			this->setUpCurrTime();
 			(this->*test)();
-			this->internalTearDown();
 		}
 	}
-};
 
-LoggerPtr TimeBasedRollingTest::logger(Logger::getLogger("org.apache.log4j.TimeBasedRollingTest"));
+	void rollIntoDir()
+	{
+		const int nrOfFnames(4);
+		const int nrOfLogMsgs((nrOfFnames * 2) - 1);
+		LogString fnames[nrOfFnames];
+
+		PatternLayoutPtr       layout(	new PatternLayout(PATTERN_LAYOUT));
+		RollingFileAppenderPtr rfa(	new RollingFileAppender());
+		rfa->setLayout(layout);
+		rfa->setFile(LOG4CXX_STR("" DIR_PRE_OUTPUT "rollIntoDir.log"));
+
+		std::random_device dev;
+		std::mt19937 rng(dev());
+		std::uniform_int_distribution<std::mt19937::result_type> dist(1,100000);
+		LogString filenamePattern = LOG4CXX_STR("" DIR_PRE_OUTPUT);
+		LogString dirNumber;
+		StringHelper::toString(static_cast<int>(dist(rng)), dirNumber);
+		LogString directoryName = LOG4CXX_STR("tbr-rollIntoDir-");
+		directoryName.append( dirNumber );
+		filenamePattern.append( directoryName );
+		LogString filenamePatternPrefix = filenamePattern;
+		filenamePattern.append( LOG4CXX_STR("/file-%d{" DATE_PATTERN "}") );
+
+		TimeBasedRollingPolicyPtr tbrp(new TimeBasedRollingPolicy());
+		tbrp->setFileNamePattern(filenamePattern);
+		tbrp->activateOptions();
+		rfa->setRollingPolicy(tbrp);
+		rfa->activateOptions();
+		logger->addAppender(rfa);
+
+		const logchar* prefix = directoryName.append(LOG4CXX_STR("/file-")).data();
+
+		Pool pool;
+		this->delGenericLogFile(pool, rfa->getFile());
+		this->buildTsFnames<4>(pool, prefix, fnames);
+		fnames[0].assign(rfa->getFile());
+
+		this->delayUntilNextSecondWithMsg();
+		this->logMsgAndSleep(	pool, nrOfLogMsgs, __LOG4CXX_FUNC__, __LINE__);
+		this->checkFilesExist(	pool, LOG4CXX_STR("test6."), fnames, 0, __LINE__);
+	}
+
+#if LOG4CXX_HAS_MULTIPROCESS_ROLLING_FILE_APPENDER
+	void unterminatedMultiprocessMapFile()
+	{
+		Pool pool;
+		char uidBuffer[64] = "0000";
+#ifndef _WIN32
+		apr_uid_t uid;
+		apr_gid_t groupid;
+		if (APR_SUCCESS == apr_uid_current(&uid, &groupid, pool.getAPRPool()))
+			apr_snprintf(uidBuffer, sizeof(uidBuffer), "%u", uid);
+#endif
+		std::string mapFile("output/rolling/tbr-map-corrupt-");
+		mapFile += uidBuffer;
+		mapFile += ".map";
+		std::string lockFile("output/rolling/tbr-map-corrupt-");
+		lockFile += uidBuffer;
+		lockFile += ".maplck";
+
+		File("output/rolling").mkdirs();
+		File(mapFile).deleteFile();
+		File(lockFile).deleteFile();
+
+		std::ofstream corruptMap(mapFile, std::ios::binary | std::ios::trunc);
+		LOGUNIT_ASSERT(corruptMap.is_open());
+		std::string unterminatedMap(4096, 'x');
+		corruptMap.write(unterminatedMap.data(), unterminatedMap.size());
+		corruptMap.close();
+
+		PatternLayoutPtr layout(new PatternLayout(PATTERN_LAYOUT));
+		RollingFileAppenderPtr rfa(new RollingFileAppender());
+		rfa->setAppend(false);
+		rfa->setLayout(layout);
+		rfa->setFile(LOG4CXX_STR("output/rolling/tbr-map-corrupt.log"));
+
+		TimeBasedRollingPolicyPtr tbrp(new TimeBasedRollingPolicy());
+		tbrp->setMultiprocess(true);
+		tbrp->setFileNamePattern(LOG4CXX_STR("output/rolling/tbr-map-corrupt-%d{" DATE_PATTERN "}"));
+		tbrp->activateOptions();
+		rfa->setRollingPolicy(tbrp);
+		rfa->activateOptions();
+		logger->addAppender(rfa);
+
+		this->delayUntilNextSecond();
+		LOG4CXX_DEBUG(logger, "roll despite corrupt map");
+		LOGUNIT_ASSERT(File("output/rolling/tbr-map-corrupt.log").exists());
+
+		LOGUNIT_ASSERT(logger->removeAppender(rfa));
+		rfa->close();
+		File(mapFile).deleteFile();
+		File(lockFile).deleteFile();
+	}
+#endif
+
+};
 
 LOGUNIT_TEST_SUITE_REGISTRATION(TimeBasedRollingTest);

@@ -1,4 +1,4 @@
-Usage {#usage-overview}
+Use {#usage-overview}
 ===
 <!--
  Note: License header cannot be first, as doxygen does not generate
@@ -23,9 +23,21 @@ Usage {#usage-overview}
 
 See the following pages for usage information:
 
-* @subpage usage
-* @subpage threading
+* @subpage quick-start
+* @subpage concepts
+* @subpage configuration-files
+* @subpage filters
 * @subpage extending-log4cxx
-* @subpage faq
-* @subpage configuration-samples
 * @subpage qt-support
+* @subpage stacktrace-support
+* @subpage threading
+* @subpage multiprocess-logging
+* @subpage environment-variables
+* @subpage macros-influencing-log4cxx
+* @subpage internal-debugging
+* @subpage disabling-color
+* @subpage performance
+* @subpage conclusions
+* @subpage faq
+* @subpage buildsystems
+* @subpage log-flow

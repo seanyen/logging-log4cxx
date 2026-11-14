@@ -15,10 +15,6 @@
  * limitations under the License.
  */
 
-#if defined(_MSC_VER)
-	#pragma warning ( disable: 4231 4251 4275 4786 )
-#endif
-
 #include <log4cxx/logstring.h>
 #include <log4cxx/helpers/class.h>
 #include <log4cxx/helpers/exception.h>
@@ -30,8 +26,8 @@
 	#define LOG4CXX 1
 #endif
 #include <log4cxx/private/log4cxx_private.h>
-#include <log4cxx/rollingfileappender.h>
-#include <log4cxx/dailyrollingfileappender.h>
+#include <log4cxx/helpers/aprinitializer.h>
+#include <log4cxx/helpers/singletonholder.h>
 
 
 #include <log4cxx/asyncappender.h>
@@ -44,24 +40,33 @@
 	#endif
 	#include <log4cxx/nt/outputdebugstringappender.h>
 #endif
-#include <log4cxx/net/smtpappender.h>
-#include <log4cxx/net/socketappender.h>
-#include <log4cxx/net/sockethubappender.h>
+#if LOG4CXX_HAS_MULTIPROCESS_ROLLING_FILE_APPENDER
+#include <log4cxx/rolling/multiprocessrollingfileappender.h>
+#endif
 #include <log4cxx/helpers/datagramsocket.h>
+#include <log4cxx/writerappender.h>
+#if LOG4CXX_HAS_NETWORKING
+#include <log4cxx/net/jsonsocketappender.h>
+#include <log4cxx/net/smtpappender.h>
 #include <log4cxx/net/syslogappender.h>
 #include <log4cxx/net/telnetappender.h>
-#include <log4cxx/writerappender.h>
 #include <log4cxx/net/xmlsocketappender.h>
+#endif
 #include <log4cxx/layout.h>
 #include <log4cxx/patternlayout.h>
+#include <log4cxx/jsonlayout.h>
 #include <log4cxx/htmllayout.h>
 #include <log4cxx/simplelayout.h>
 #include <log4cxx/xml/xmllayout.h>
-#include <log4cxx/ttcclayout.h>
+#if LOG4CXX_HAS_FMT_LAYOUT
+#include <log4cxx/fmtlayout.h>
+#endif
 
 #include <log4cxx/filter/levelmatchfilter.h>
 #include <log4cxx/filter/levelrangefilter.h>
 #include <log4cxx/filter/stringmatchfilter.h>
+#include <log4cxx/filter/locationinfofilter.h>
+#include <log4cxx/filter/mapfilter.h>
 #include <log4cxx/rolling/filterbasedtriggeringpolicy.h>
 #include <log4cxx/rolling/fixedwindowrollingpolicy.h>
 #include <log4cxx/rolling/manualtriggeringpolicy.h>
@@ -72,15 +77,23 @@
 #include <log4cxx/xml/domconfigurator.h>
 #include <log4cxx/propertyconfigurator.h>
 #include <log4cxx/varia/fallbackerrorhandler.h>
-#include <apr.h>
 
 
-using namespace log4cxx;
-using namespace log4cxx::helpers;
-using namespace log4cxx::net;
-using namespace log4cxx::filter;
-using namespace log4cxx::xml;
-using namespace log4cxx::rolling;
+using namespace LOG4CXX_NS;
+using namespace LOG4CXX_NS::helpers;
+using namespace LOG4CXX_NS::filter;
+using namespace LOG4CXX_NS::xml;
+using namespace LOG4CXX_NS::rolling;
+
+namespace LOG4CXX_NS
+{
+uint32_t libraryVersion()
+{
+	// This function defined in log4cxx.h
+	return LOG4CXX_VERSION;
+}
+}
+
 
 Class::Class()
 {
@@ -90,10 +103,6 @@ Class::~Class()
 {
 }
 
-LogString Class::toString() const
-{
-	return getName();
-}
 
 Object* Class::newInstance() const
 {
@@ -103,107 +112,131 @@ Object* Class::newInstance() const
 #endif
 }
 
-
-
 Class::ClassMap& Class::getRegistry()
 {
-	static ClassMap registry;
-	return registry;
+	using ClassMapHolder = SingletonHolder<ClassMap>;
+	auto pHolder = APRInitializer::getOrAddUnique<ClassMapHolder>
+		( []() -> ObjectPtr
+			{ return std::make_shared<ClassMapHolder>(); }
+		);
+	return pHolder->value();
 }
 
 const Class& Class::forName(const LogString& className)
 {
 	LogString lowerName(StringHelper::toLowerCase(className));
+	auto& classRegister = getRegistry();
 	//
 	//  check registry using full class name
 	//
-	const Class* clazz = getRegistry()[lowerName];
+	auto pEntry = classRegister.find(lowerName);
 
-	if (clazz == 0)
+	if (classRegister.end() == pEntry)
 	{
 		LogString::size_type pos = className.find_last_of(LOG4CXX_STR(".$"));
 
 		if (pos != LogString::npos)
 		{
 			LogString terminalName(lowerName, pos + 1, LogString::npos);
-			clazz = getRegistry()[terminalName];
+			pEntry = classRegister.find(terminalName);
 
-			if (clazz == 0)
+			if (classRegister.end() == pEntry)
 			{
 				registerClasses();
-				clazz = getRegistry()[lowerName];
+				pEntry = classRegister.find(lowerName);
 
-				if (clazz == 0)
+				if (classRegister.end() == pEntry)
 				{
-					clazz = getRegistry()[terminalName];
+					pEntry = classRegister.find(terminalName);
 				}
 			}
 		}
 		else
 		{
 			registerClasses();
-			clazz = getRegistry()[lowerName];
+			pEntry = classRegister.find(lowerName);
 		}
 	}
 
-	if (clazz == 0)
+	if (classRegister.end() == pEntry || !pEntry->second)
 	{
 		throw ClassNotFoundException(className);
 	}
 
-	return *clazz;
+	return *pEntry->second;
+}
+
+auto Class::withNameSuffix(const LogString& nameSuffix) -> std::vector<const Class*>
+{
+	auto& classRegister = getRegistry();
+	if (classRegister.size() < 20)
+		registerClasses();
+
+	LogString lowerSuffix(StringHelper::toLowerCase(nameSuffix));
+	std::vector<const Class*> result;
+	for (auto& entry : classRegister)
+	{
+		if (lowerSuffix.size() < entry.first.size() &&
+			entry.first.substr(entry.first.size() - lowerSuffix.size()) == lowerSuffix)
+		{
+			result.push_back(entry.second);
+		}
+	}
+	return result;
 }
 
 bool Class::registerClass(const Class& newClass)
 {
-	getRegistry()[StringHelper::toLowerCase(newClass.getName())] = &newClass;
+	auto& classRegister = getRegistry();
+	classRegister[StringHelper::toLowerCase(newClass.getName())] = &newClass;
 	return true;
 }
 
 void Class::registerClasses()
 {
-#if APR_HAS_THREADS
 	AsyncAppender::registerClass();
-#endif
 	ConsoleAppender::registerClass();
 	FileAppender::registerClass();
-	log4cxx::db::ODBCAppender::registerClass();
+	LOG4CXX_NS::db::ODBCAppender::registerClass();
 #if (defined(WIN32) || defined(_WIN32))
 #if !defined(_WIN32_WCE)
-	log4cxx::nt::NTEventLogAppender::registerClass();
+	LOG4CXX_NS::nt::NTEventLogAppender::registerClass();
 #endif
-	log4cxx::nt::OutputDebugStringAppender::registerClass();
+	LOG4CXX_NS::nt::OutputDebugStringAppender::registerClass();
 #endif
-	log4cxx::RollingFileAppender::registerClass();
-	SMTPAppender::registerClass();
-	SocketAppender::registerClass();
-#if APR_HAS_THREADS
-	SocketHubAppender::registerClass();
-#endif
-	SyslogAppender::registerClass();
-#if APR_HAS_THREADS
-	TelnetAppender::registerClass();
-#endif
-	XMLSocketAppender::registerClass();
-	DateLayout::registerClass();
+	JSONLayout::registerClass();
 	HTMLLayout::registerClass();
+#if LOG4CXX_HAS_FMT_LAYOUT
+	FMTLayout::registerClass();
+#endif
 	PatternLayout::registerClass();
 	SimpleLayout::registerClass();
-	TTCCLayout::registerClass();
 	XMLLayout::registerClass();
 	LevelMatchFilter::registerClass();
 	LevelRangeFilter::registerClass();
 	StringMatchFilter::registerClass();
-	log4cxx::RollingFileAppender::registerClass();
-	log4cxx::rolling::RollingFileAppender::registerClass();
-	DailyRollingFileAppender::registerClass();
-	log4cxx::rolling::SizeBasedTriggeringPolicy::registerClass();
-	log4cxx::rolling::TimeBasedRollingPolicy::registerClass();
-	log4cxx::rolling::ManualTriggeringPolicy::registerClass();
-	log4cxx::rolling::FixedWindowRollingPolicy::registerClass();
-	log4cxx::rolling::FilterBasedTriggeringPolicy::registerClass();
-	log4cxx::xml::DOMConfigurator::registerClass();
-	log4cxx::PropertyConfigurator::registerClass();
-	log4cxx::varia::FallbackErrorHandler::registerClass();
+	LocationInfoFilter::registerClass();
+	MapFilter::registerClass();
+	LOG4CXX_NS::rolling::RollingFileAppender::registerClass();
+#if LOG4CXX_HAS_MULTIPROCESS_ROLLING_FILE_APPENDER
+	LOG4CXX_NS::rolling::MultiprocessRollingFileAppender::registerClass();
+#endif
+	LOG4CXX_NS::rolling::SizeBasedTriggeringPolicy::registerClass();
+	LOG4CXX_NS::rolling::TimeBasedRollingPolicy::registerClass();
+	LOG4CXX_NS::rolling::ManualTriggeringPolicy::registerClass();
+	LOG4CXX_NS::rolling::FixedWindowRollingPolicy::registerClass();
+	LOG4CXX_NS::rolling::FilterBasedTriggeringPolicy::registerClass();
+#if LOG4CXX_HAS_DOMCONFIGURATOR
+	LOG4CXX_NS::xml::DOMConfigurator::registerClass();
+#endif
+	LOG4CXX_NS::PropertyConfigurator::registerClass();
+	LOG4CXX_NS::varia::FallbackErrorHandler::registerClass();
+#if LOG4CXX_HAS_NETWORKING
+	net::TelnetAppender::registerClass();
+	net::JSONSocketAppender::registerClass();
+	net::SMTPAppender::registerClass();
+	net::XMLSocketAppender::registerClass();
+	net::SyslogAppender::registerClass();
+#endif
 }
 

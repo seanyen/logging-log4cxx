@@ -22,14 +22,24 @@
 #include <algorithm>
 #include <cstring>
 
-using namespace log4cxx;
-using namespace log4cxx::helpers;
+using namespace LOG4CXX_NS;
+using namespace LOG4CXX_NS::helpers;
 using namespace std;
+
+struct ByteArrayInputStream::ByteArrayInputStreamPriv
+{
+	ByteArrayInputStreamPriv(const ByteList& bytes) :
+		buf(bytes),
+		pos(0) {}
+
+	ByteList buf;
+	size_t pos;
+};
 
 IMPLEMENT_LOG4CXX_OBJECT(ByteArrayInputStream)
 
 ByteArrayInputStream::ByteArrayInputStream(const std::vector<unsigned char>& bytes) :
-	buf(bytes), pos(0)
+	m_priv(std::make_unique<ByteArrayInputStreamPriv>(bytes))
 {
 }
 
@@ -47,16 +57,16 @@ void ByteArrayInputStream::close()
 
 int ByteArrayInputStream::read(ByteBuffer& dst)
 {
-	if (pos >= buf.size())
+	if (m_priv->pos >= m_priv->buf.size())
 	{
 		return -1;
 	}
 	else
 	{
-		size_t bytesCopied = min(dst.remaining(), buf.size() - pos);
-		std::memcpy(dst.current(), &buf[pos], bytesCopied);
-		pos += bytesCopied;
-		dst.position(dst.position() + bytesCopied);
+		size_t bytesCopied = min(dst.remaining(), m_priv->buf.size() - m_priv->pos);
+		std::memcpy(dst.current(), &m_priv->buf[m_priv->pos], bytesCopied);
+		m_priv->pos += bytesCopied;
+		dst.increment_position(bytesCopied);
 		return (int)bytesCopied;
 	}
 }

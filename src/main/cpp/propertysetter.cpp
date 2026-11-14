@@ -15,49 +15,37 @@
  * limitations under the License.
  */
 
-#include <log4cxx/logstring.h>
 #include <log4cxx/config/propertysetter.h>
-#include <log4cxx/helpers/object.h>
 #include <log4cxx/helpers/loglog.h>
 #include <log4cxx/helpers/optionconverter.h>
 #include <log4cxx/spi/optionhandler.h>
 #include <log4cxx/helpers/properties.h>
+#include <log4cxx/helpers/stringhelper.h>
 #include <log4cxx/appender.h>
-#include <log4cxx/layout.h>
-#include <log4cxx/helpers/pool.h>
 
-using namespace log4cxx;
-using namespace log4cxx::helpers;
-using namespace log4cxx::spi;
-using namespace log4cxx::config;
+
+using namespace LOG4CXX_NS;
+using namespace LOG4CXX_NS::helpers;
+using namespace LOG4CXX_NS::spi;
+using namespace LOG4CXX_NS::config;
 
 PropertySetter::PropertySetter(const helpers::ObjectPtr& obj1) : obj(obj1)
 {
 }
 
-void PropertySetter::setProperties(const helpers::ObjectPtr& obj,
-	helpers::Properties& properties,
-	const LogString& prefix,
-	Pool& p)
+void PropertySetter::setProperties(const helpers::ObjectPtr& obj, helpers::Properties& properties, const LogString& prefix)
 {
-	PropertySetter(obj).setProperties(properties, prefix, p);
+	PropertySetter(obj).setProperties(properties, prefix);
 }
 
 
-void PropertySetter::setProperties(helpers::Properties& properties,
-	const LogString& prefix,
-	Pool& p)
+void PropertySetter::setProperties(helpers::Properties& properties, const LogString& prefix)
 {
 	size_t len = prefix.length();
 
-	std::vector<LogString> names = properties.propertyNames();
-	std::vector<LogString>::iterator it;
-
-	for (it = names.begin(); it != names.end(); it++)
+	for (auto key : properties.propertyNames())
 	{
-		LogString key = *it;
-
-		// handle only properties that start with the desired frefix.
+		// handle only properties that start with the desired prefix.
 		if (key.find(prefix) == 0)
 		{
 			// ignore key if it contains dots after the prefix
@@ -76,16 +64,14 @@ void PropertySetter::setProperties(helpers::Properties& properties,
 				continue;
 			}
 
-			setProperty(key, value, p);
+			setProperty(key, value);
 		}
 	}
 
-	activate(p);
+	activate();
 }
 
-void PropertySetter::setProperty(const LogString& option,
-	const LogString& value,
-	Pool&)
+void PropertySetter::setProperty(const LogString& option, const LogString& value)
 {
 	if (value.empty())
 	{
@@ -94,18 +80,33 @@ void PropertySetter::setProperty(const LogString& option,
 
 	if (obj != 0 && obj->instanceof(OptionHandler::getStaticClass()))
 	{
-		LogLog::debug(LOG4CXX_STR("Setting option name=[") +
-			option + LOG4CXX_STR("], value=[") + value + LOG4CXX_STR("]"));
-		OptionHandlerPtr handler = log4cxx::cast<OptionHandler>(obj);
+		if (LogLog::isDebugEnabled())
+		{
+			// Do not echo secret-bearing option values (e.g. the ODBCAppender
+			// "Password", SMTPAppender "SMTPPassword" or DBAppender
+			// "DriverParams" options) into diagnostic output: internal debug
+			// output routinely flows into console/log pipelines with weaker
+			// access control than the configuration file itself.
+			LogString lowerOption(StringHelper::toLowerCase(option));
+			bool sensitive =
+				lowerOption.find(LOG4CXX_STR("password")) != LogString::npos ||
+				lowerOption.find(LOG4CXX_STR("driverparams")) != LogString::npos;
+			LogLog::debug(LOG4CXX_STR("Setting option name=[") +
+				option + LOG4CXX_STR("], value=[") +
+				(sensitive ? LogString(LOG4CXX_STR("****")) : value) +
+				LOG4CXX_STR("]"));
+		}
+		OptionHandlerPtr handler = LOG4CXX_NS::cast<OptionHandler>(obj);
 		handler->setOption(option, value);
 	}
 }
 
-void PropertySetter::activate(Pool& p)
+void PropertySetter::activate()
 {
 	if (obj != 0 && obj->instanceof(OptionHandler::getStaticClass()))
 	{
-		OptionHandlerPtr handler = log4cxx::cast<OptionHandler>(obj);
-		handler->activateOptions(p);
+		OptionHandlerPtr handler = LOG4CXX_NS::cast<OptionHandler>(obj);
+		handler->activateOptions();
 	}
 }
+

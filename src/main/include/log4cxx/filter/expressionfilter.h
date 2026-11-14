@@ -18,15 +18,9 @@
 #ifndef _LOG4CXX_FILTER_EXPRESSIONFILTER_H
 #define _LOG4CXX_FILTER_EXPRESSIONFILTER_H
 
-#if defined(_MSC_VER)
-	#pragma warning ( push )
-	#pragma warning ( disable: 4231 4251 4275 4786 )
-#endif
-
-
 #include <log4cxx/spi/filter.h>
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 namespace rule
 {
@@ -81,26 +75,26 @@ namespace filter
  *
  *
  */
-class LOG4CXX_EXPORT ExpressionFilter: public log4cxx::spi::Filter
+class LOG4CXX_EXPORT ExpressionFilter: public LOG4CXX_NS::spi::Filter
 {
 	private:
 		bool acceptOnMatch;
 		bool convertInFixToPostFix;
-		LogString expression;
-		log4cxx::rule::RulePtr expressionRule;
+		LOG4CXX_DECLARE_PRIVATE_MEMBER(LogString, expression)
+		LOG4CXX_DECLARE_PRIVATE_MEMBER(rule::RulePtr, expressionRule)
 		ExpressionFilter(const ExpressionFilter&);
 		ExpressionFilter& operator=(const ExpressionFilter&);
 
 	public:
 		DECLARE_LOG4CXX_OBJECT(ExpressionFilter)
 		BEGIN_LOG4CXX_CAST_MAP()
-		LOG4CXX_CAST_ENTRY(log4cxx::spi::Filter)
+		LOG4CXX_CAST_ENTRY(LOG4CXX_NS::spi::Filter)
 		END_LOG4CXX_CAST_MAP()
 
 
 		ExpressionFilter();
 
-		void activateOptions(log4cxx::helpers::Pool& p);
+		void activateOptions(  ) override;
 
 		void setExpression(const LogString& expression);
 
@@ -117,14 +111,10 @@ class LOG4CXX_EXPORT ExpressionFilter: public log4cxx::spi::Filter
 		/**
 		   Returns {@link log4cxx::spi::Filter#NEUTRAL} is there is no string match.
 		 */
-		FilterDecision decide(const spi::LoggingEventPtr& event) const;
+		FilterDecision decide(const spi::LoggingEventPtr& event) const override;
 };
 }
 }
-
-#if defined(_MSC_VER)
-	#pragma warning ( pop )
-#endif
 
 
 #endif

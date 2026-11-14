@@ -26,47 +26,157 @@
 #if !defined(LOG4CXX)
 	#define LOG4CXX 1
 #endif
-#include <log4cxx/private/log4cxx_private.h>
-#include <apr_strings.h>
-
-#if LOG4CXX_HAVE_SYSLOG
-	#include <syslog.h>
-#else
-	/* facility codes */
-	#define   LOG_KERN (0<<3)   /* kernel messages */
-	#define   LOG_USER (1<<3)   /* random user-level messages */
-	#define   LOG_MAIL (2<<3)   /* mail system */
-	#define   LOG_DAEMON  (3<<3)   /* system daemons */
-	#define   LOG_AUTH (4<<3)   /* security/authorization messages */
-	#define   LOG_SYSLOG  (5<<3)   /* messages generated internally by syslogd */
-	#define   LOG_LPR     (6<<3)   /* line printer subsystem */
-	#define   LOG_NEWS (7<<3)   /* network news subsystem */
-	#define   LOG_UUCP (8<<3)   /* UUCP subsystem */
-	#define   LOG_CRON (9<<3)   /* clock daemon */
-	#define   LOG_AUTHPRIV   (10<<3)  /* security/authorization messages (private) */
-	#define   LOG_FTP     (11<<3)  /* ftp daemon */
-
-	/* other codes through 15 reserved for system use */
-	#define   LOG_LOCAL0  (16<<3)  /* reserved for local use */
-	#define   LOG_LOCAL1  (17<<3)  /* reserved for local use */
-	#define   LOG_LOCAL2  (18<<3)  /* reserved for local use */
-	#define   LOG_LOCAL3  (19<<3)  /* reserved for local use */
-	#define   LOG_LOCAL4  (20<<3)  /* reserved for local use */
-	#define   LOG_LOCAL5  (21<<3)  /* reserved for local use */
-	#define   LOG_LOCAL6  (22<<3)  /* reserved for local use */
-	#define   LOG_LOCAL7  (23<<3)  /* reserved for local use */
-#endif
+#include <log4cxx/private/syslogappender_priv.h>
+#include <algorithm>
 
 #define LOG_UNDEF -1
 
-using namespace log4cxx;
-using namespace log4cxx::helpers;
-using namespace log4cxx::net;
+using namespace LOG4CXX_NS;
+using namespace LOG4CXX_NS::helpers;
+using namespace LOG4CXX_NS::net;
+
+namespace
+{
+	constexpr size_t SYSLOG_PACKET_SUFFIX_RESERVED_CHARS = 12;
+
+	void appendPacketSuffix(LogString& item, size_t current, size_t total)
+	{
+		item.append(LOG4CXX_STR("("));
+		StringHelper::toString(current, item);
+		item.append(LOG4CXX_STR("/"));
+		StringHelper::toString(total, item);
+		item.append(LOG4CXX_STR(")"));
+	}
+}
+
+namespace LOG4CXX_NS
+{
+namespace net
+{
+namespace detail
+{
+LOG4CXX_EXPORT std::vector<LogString> splitSyslogPackets(const LogString& msg, size_t maxMessageLength)
+{
+	std::vector<LogString> packets;
+	auto digitCount = [](size_t value) {
+		size_t digits = 1u;
+		while (value >= 10u)
+		{
+			value /= 10u;
+			++digits;
+		}
+		return digits;
+	};
+	auto reservePackets = [&](size_t count) -> bool
+	{
+		if (count > packets.max_size())
+		{
+			LogLog::error(LOG4CXX_STR("SyslogAppender cannot reserve memory for packet splitting; message too large."));
+			return false;
+		}
+
+		try
+		{
+			packets.reserve(count);
+			return true;
+		}
+		catch (const std::length_error&)
+		{
+			LogLog::error(LOG4CXX_STR("SyslogAppender cannot reserve memory for packet splitting; message too large."));
+			return false;
+		}
+	};
+	auto splitByChunkSize = [&](size_t chunkSize, bool appendSuffix) -> bool
+	{
+		const size_t nChunks = msg.size() / chunkSize + ((msg.size() % chunkSize) != 0u ? 1u : 0u);
+		if (!reservePackets(nChunks))
+		{
+			return false;
+		}
+
+		for (size_t start = 0u; start < msg.size();)
+		{
+			const size_t remaining = msg.size() - start;
+			const size_t count = std::min(chunkSize, remaining);
+			packets.push_back(msg.substr(start, count));
+			start += count;
+		}
+
+		if (appendSuffix)
+		{
+			size_t current = 1u;
+			for (auto& item : packets)
+			{
+				appendPacketSuffix(item, current, packets.size());
+				++current;
+			}
+		}
+
+		return true;
+	};
+
+	if (maxMessageLength == 0u)
+	{
+		return packets;
+	}
+
+	if (msg.size() <= maxMessageLength)
+	{
+		packets.push_back(msg);
+		return packets;
+	}
+
+	size_t chunkSize = maxMessageLength > SYSLOG_PACKET_SUFFIX_RESERVED_CHARS
+		? maxMessageLength - SYSLOG_PACKET_SUFFIX_RESERVED_CHARS
+		: 1u;
+
+	const size_t maxIterations = 10u;
+	for (size_t iter = 0u; iter < maxIterations; ++iter)
+	{
+		const size_t nChunks = msg.size() / chunkSize + ((msg.size() % chunkSize) != 0u ? 1u : 0u);
+		const size_t suffixLen = 2u * digitCount(nChunks) + 3u;
+
+		if (suffixLen <= SYSLOG_PACKET_SUFFIX_RESERVED_CHARS)
+		{
+			splitByChunkSize(chunkSize, true);
+			return packets;
+		}
+
+		if (suffixLen >= maxMessageLength)
+		{
+			LogLog::warn(LOG4CXX_STR("SyslogAppender: suffix does not fit in MaxMessageLength; omitting packet suffix."));
+			splitByChunkSize(maxMessageLength, false);
+			return packets;
+		}
+
+		size_t newChunkSize = maxMessageLength - suffixLen;
+		if (newChunkSize == 0u)
+		{
+			newChunkSize = 1u;
+		}
+
+		if (newChunkSize >= chunkSize)
+		{
+			splitByChunkSize(chunkSize, true);
+			return packets;
+		}
+
+		chunkSize = newChunkSize;
+	}
+
+	splitByChunkSize(chunkSize, true);
+	return packets;
+}
+}
+}
+}
 
 IMPLEMENT_LOG4CXX_OBJECT(SyslogAppender)
 
+#define _priv static_cast<SyslogAppenderPriv*>(m_priv.get())
+
 SyslogAppender::SyslogAppender()
-	: syslogFacility(LOG_USER), facilityPrinting(false), sw(0), maxMessageLength(1024)
+	: AppenderSkeleton (std::make_unique<SyslogAppenderPriv>())
 {
 	this->initSyslogFacilityStr();
 
@@ -74,55 +184,41 @@ SyslogAppender::SyslogAppender()
 
 SyslogAppender::SyslogAppender(const LayoutPtr& layout1,
 	int syslogFacility1)
-	: syslogFacility(syslogFacility1), facilityPrinting(false), sw(0), maxMessageLength(1024)
+	: AppenderSkeleton (std::make_unique<SyslogAppenderPriv>(layout1, syslogFacility1))
 {
-	this->layout = layout1;
 	this->initSyslogFacilityStr();
 }
 
 SyslogAppender::SyslogAppender(const LayoutPtr& layout1,
 	const LogString& syslogHost1, int syslogFacility1)
-	: syslogFacility(syslogFacility1), facilityPrinting(false), sw(0), maxMessageLength(1024)
+	: AppenderSkeleton (std::make_unique<SyslogAppenderPriv>(layout1, syslogHost1, syslogFacility1))
 {
-	this->layout = layout1;
 	this->initSyslogFacilityStr();
 	setSyslogHost(syslogHost1);
 }
 
 SyslogAppender::~SyslogAppender()
 {
-	finalize();
-}
-
-/** Release any resources held by this SyslogAppender.*/
-void SyslogAppender::close()
-{
-	closed = true;
-
-	if (sw != 0)
-	{
-		delete sw;
-		sw = 0;
-	}
+	if (_priv->setClosed())
+		_priv->shutdown();
 }
 
 void SyslogAppender::initSyslogFacilityStr()
 {
-	facilityStr = getFacilityString(this->syslogFacility);
+	_priv->facilityStr = getFacilityString(_priv->syslogFacility);
 
-	if (facilityStr.empty())
+	if (_priv->facilityStr.empty())
 	{
-		Pool p;
 		LogString msg(LOG4CXX_STR("\""));
-		StringHelper::toString(syslogFacility, p, msg);
+		StringHelper::toString(_priv->syslogFacility, msg);
 		msg.append(LOG4CXX_STR("\" is an unknown syslog facility. Defaulting to \"USER\"."));
-		LogLog::error(msg);
-		this->syslogFacility = LOG_USER;
-		facilityStr = LOG4CXX_STR("user:");
+		LogLog::warn(msg);
+		_priv->syslogFacility = LOG_USER;
+		_priv->facilityStr = LOG4CXX_STR("user:");
 	}
 	else
 	{
-		facilityStr += LOG4CXX_STR(":");
+		_priv->facilityStr += LOG4CXX_STR(":");
 	}
 }
 
@@ -300,74 +396,28 @@ int SyslogAppender::getFacility(
 	}
 }
 
-void SyslogAppender::append(const spi::LoggingEventPtr& event, Pool& p)
+void SyslogAppender::append( const spi::LoggingEventPtr& event )
 {
-	if  (!isAsSevereAsThreshold(event->getLevel()))
+	LogString msg;
+	_priv->layout->format(msg, event);
+	auto packets = detail::splitSyslogPackets(msg, static_cast<size_t>(_priv->maxMessageLength));
+	if (packets.empty() && !msg.empty())
 	{
 		return;
-	}
-
-	LogString msg;
-	std::string encoded;
-	layout->format(msg, event, p);
-
-	Transcoder::encode(msg, encoded);
-
-	// Split up the message if it is over maxMessageLength in size.
-	// According to RFC 3164, the max message length is 1024, however
-	// newer systems(such as syslog-ng) can go up to 8k in size for their
-	// messages.  We will append (x/y) at the end of each message
-	// to indicate how far through the message we are
-	std::vector<LogString> packets;
-
-	if ( msg.size() > maxMessageLength )
-	{
-		LogString::iterator start = msg.begin();
-
-		while ( start != msg.end() )
-		{
-			LogString::iterator end = start + maxMessageLength - 12;
-
-			if ( end > msg.end() )
-			{
-				end = msg.end();
-			}
-
-			LogString newMsg = LogString( start, end );
-			packets.push_back( newMsg );
-			start = end;
-		}
-
-		int current = 1;
-
-		for ( std::vector<LogString>::iterator it = packets.begin();
-			it != packets.end();
-			it++, current++ )
-		{
-			char buf[12];
-			apr_snprintf( buf, sizeof(buf), "(%d/%d)", current, packets.size() );
-			LOG4CXX_DECODE_CHAR(str, buf);
-			it->append( str );
-		}
-	}
-	else
-	{
-		packets.push_back( msg );
 	}
 
 	// On the local host, we can directly use the system function 'syslog'
 	// if it is available
 #if LOG4CXX_HAVE_SYSLOG
 
-	if (sw == 0)
+	if (_priv->sw == 0)
 	{
-		for ( std::vector<LogString>::iterator it = packets.begin();
-			it != packets.end();
-			it++ )
+		for (auto const& item : packets)
 		{
 			// use of "%s" to avoid a security hole
-			::syslog(syslogFacility | event->getLevel()->getSyslogEquivalent(),
-				"%s", it->c_str());
+			LOG4CXX_ENCODE_CHAR(itemStr, item);
+			::syslog(_priv->syslogFacility | event->getLevel()->getSyslogEquivalent(),
+				"%s", itemStr.c_str());
 		}
 
 		return;
@@ -376,34 +426,29 @@ void SyslogAppender::append(const spi::LoggingEventPtr& event, Pool& p)
 #endif
 
 	// We must not attempt to append if sw is null.
-	if (sw == 0)
+	if (_priv->sw == 0)
 	{
-		errorHandler->error(LOG4CXX_STR("No syslog host is set for SyslogAppedender named \"") +
-			this->name + LOG4CXX_STR("\"."));
+		_priv->errorHandler->error(LOG4CXX_STR("No syslog host is set for SyslogAppedender named \"") +
+			_priv->name + LOG4CXX_STR("\"."));
 		return;
 	}
 
-	for ( std::vector<LogString>::iterator it = packets.begin();
-		it != packets.end();
-		it++ )
+	for (auto const& item : packets)
 	{
 		LogString sbuf(1, 0x3C /* '<' */);
-		StringHelper::toString((syslogFacility | event->getLevel()->getSyslogEquivalent()), p, sbuf);
+		StringHelper::toString((_priv->syslogFacility | event->getLevel()->getSyslogEquivalent()), sbuf);
 		sbuf.append(1, (logchar) 0x3E /* '>' */);
 
-		if (facilityPrinting)
+		if (_priv->facilityPrinting)
 		{
-			sbuf.append(facilityStr);
+			sbuf.append(_priv->facilityStr);
 		}
 
-		sbuf.append(*it);
-		sw->write(sbuf);
+		sbuf.append(item);
+		_priv->sw->write(sbuf);
 	}
 }
 
-void SyslogAppender::activateOptions(Pool&)
-{
-}
 
 void SyslogAppender::setOption(const LogString& option, const LogString& value)
 {
@@ -427,10 +472,9 @@ void SyslogAppender::setOption(const LogString& option, const LogString& value)
 
 void SyslogAppender::setSyslogHost(const LogString& syslogHost1)
 {
-	if (this->sw != 0)
+	if (_priv->sw != 0)
 	{
-		delete this->sw;
-		this->sw = 0;
+		_priv->sw = nullptr;
 	}
 
 	LogString slHost = syslogHost1;
@@ -441,7 +485,7 @@ void SyslogAppender::setSyslogHost(const LogString& syslogHost1)
 
 	if (colonPos != LogString::npos)
 	{
-		slHostPort = StringHelper::toInt(slHost.substr(colonPos + 1));
+		slHostPort = OptionConverter::toInt(slHost.substr(colonPos + 1), -1);
 		// Erase the :port part of the host name
 		slHost.erase( colonPos );
 	}
@@ -453,17 +497,19 @@ void SyslogAppender::setSyslogHost(const LogString& syslogHost1)
 	if (syslogHost1 != LOG4CXX_STR("localhost") && syslogHost1 != LOG4CXX_STR("127.0.0.1")
 		&& !syslogHost1.empty())
 #endif
+	{
 		if (slHostPort >= 0)
 		{
-			this->sw = new SyslogWriter(slHost, slHostPort);
+			_priv->sw = std::make_unique<SyslogWriter>(slHost, slHostPort);
 		}
 		else
 		{
-			this->sw = new SyslogWriter(slHost);
+			_priv->sw = std::make_unique<SyslogWriter>(slHost);
 		}
+	}
 
-	this->syslogHost = slHost;
-	this->syslogHostPort = slHostPort;
+	_priv->syslogHost = slHost;
+	_priv->syslogHostPort = slHostPort;
 }
 
 
@@ -474,15 +520,53 @@ void SyslogAppender::setFacility(const LogString& facilityName)
 		return;
 	}
 
-	syslogFacility = getFacility(facilityName);
+	_priv->syslogFacility = getFacility(facilityName);
 
-	if (syslogFacility == LOG_UNDEF)
+	if (_priv->syslogFacility == LOG_UNDEF)
 	{
-		LogLog::error(LOG4CXX_STR("[") + facilityName +
+		LogLog::warn(LOG4CXX_STR("[") + facilityName +
 			LOG4CXX_STR("] is an unknown syslog facility. Defaulting to [USER]."));
-		syslogFacility = LOG_USER;
+		_priv->syslogFacility = LOG_USER;
 	}
 
 	this->initSyslogFacilityStr();
 }
 
+const LogString& SyslogAppender::getSyslogHost() const
+{
+	return _priv->syslogHost;
+}
+
+LogString SyslogAppender::getFacility() const
+{
+	return getFacilityString(_priv->syslogFacility);
+}
+
+void SyslogAppender::setFacilityPrinting(bool facilityPrinting1)
+{
+	_priv->facilityPrinting = facilityPrinting1;
+}
+
+bool SyslogAppender::getFacilityPrinting() const
+{
+	return _priv->facilityPrinting;
+}
+
+void SyslogAppender::setMaxMessageLength(int maxMessageLength1)
+{
+	// append() reserves 12 characters per chunk for an "(x/y)" sequence suffix.
+	// A value at or below the suffix size produces a zero-length chunk (causing
+	// an infinite split loop) or an iterator computed before msg.begin() (UB).
+	static const int MIN_MAX_MESSAGE_LENGTH = 13;
+	if (maxMessageLength1 < MIN_MAX_MESSAGE_LENGTH)
+	{
+		LogLog::warn(LOG4CXX_STR("SyslogAppender MaxMessageLength is too small. Using the default value."));
+		maxMessageLength1 = 1024;
+	}
+	_priv->maxMessageLength = maxMessageLength1;
+}
+
+int SyslogAppender::getMaxMessageLength() const
+{
+	return _priv->maxMessageLength;
+}

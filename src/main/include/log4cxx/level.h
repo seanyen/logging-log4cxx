@@ -22,14 +22,8 @@
 #include <log4cxx/logstring.h>
 #include <limits.h>
 #include <log4cxx/helpers/object.h>
-#include <mutex>
 
-#if defined(_MSC_VER)
-	#pragma warning ( push )
-	#pragma warning ( disable: 4251 )
-#endif
-
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 /**
  * LOG4CXX_PTR_DEF can't be used to get a smart pointer for Level because we need to override
@@ -58,7 +52,7 @@ class LOG4CXX_EXPORT Level : public helpers::Object
 			public:
 				LevelClass() : helpers::Class() {}
 
-				virtual LogString getName() const
+				LogString getName() const override
 				{
 					return LOG4CXX_STR("Level");
 				}
@@ -131,29 +125,6 @@ class LOG4CXX_EXPORT Level : public helpers::Object
 		 */
 		void toString(std::wstring& name) const;
 #endif
-#if LOG4CXX_UNICHAR_API
-		/**
-		Convert the string passed as argument to a level. If the
-		conversion fails, then this method returns DEBUG.
-		* @param sArg level name.
-		*/
-		static LevelPtr toLevel(const std::basic_string<UniChar>& sArg);
-		/**
-		Convert the string passed as argument to a level. If the
-		conversion fails, then this method returns the value of
-		<code>defaultLevel</code>.
-		* @param sArg level name.
-		* @param defaultLevel level to return if no match.
-		* @return
-		*/
-		static LevelPtr toLevel(const std::basic_string<UniChar>& sArg,
-			const LevelPtr& defaultLevel);
-		/**
-		 *  Get the name of the level.
-		 *  @param name buffer to which name is appended.
-		 */
-		void toString(std::basic_string<UniChar>& name) const;
-#endif
 #if LOG4CXX_CFSTRING_API
 		/**
 		Convert the string passed as argument to a level. If the
@@ -223,8 +194,20 @@ class LOG4CXX_EXPORT Level : public helpers::Object
 			ALL_INT = INT_MIN
 		};
 
+		struct Data
+		{
+			LevelPtr Off;
+			LevelPtr Fatal;
+			LevelPtr Error;
+			LevelPtr Warn;
+			LevelPtr Info;
+			LevelPtr Debug;
+			LevelPtr Trace;
+			LevelPtr All;
+		};
+		using DataPtr = std::shared_ptr<Data>;
 
-		static void initializeLevels();
+		static const DataPtr& getData();
 		static LevelPtr getAll();
 		static LevelPtr getFatal();
 		static LevelPtr getError();
@@ -280,19 +263,8 @@ class LOG4CXX_EXPORT Level : public helpers::Object
 		}
 
 	private:
-		static volatile bool initialized;
-		static std::mutex initMutex;
-		static LevelPtr allLevel;
-		static LevelPtr fatalLevel;
-		static LevelPtr errorLevel;
-		static LevelPtr warnLevel;
-		static LevelPtr infoLevel;
-		static LevelPtr debugLevel;
-		static LevelPtr traceLevel;
-		static LevelPtr offLevel;
-
+		LOG4CXX_DECLARE_PRIVATE_MEMBER(LogString, name)
 		int level;
-		LogString name;
 		int syslogEquivalent;
 		Level(const Level&);
 		Level& operator=(const Level&);
@@ -305,20 +277,15 @@ class LOG4CXX_EXPORT Level : public helpers::Object
 	class Class##level : public Level::LevelClass\
 	{\
 		public:\
-			Class##level() : Level::LevelClass() {}\
-			virtual LogString getName() const { return LOG4CXX_STR(#level); } \
-			virtual LevelPtr toLevel(const LogString& sArg) const\
+			LogString getName() const override { return LOG4CXX_STR(#level); } \
+			LevelPtr toLevel(const LogString& sArg) const override\
 			{ return level::toLevelLS(sArg); }\
-			virtual LevelPtr toLevel(int val) const\
+			LevelPtr toLevel(int val) const override\
 			{ return level::toLevel(val); }\
 	};\
 	DECLARE_LOG4CXX_OBJECT_WITH_CUSTOM_CLASS(level, Class##level)
 
 #define IMPLEMENT_LOG4CXX_LEVEL(level) \
 	IMPLEMENT_LOG4CXX_OBJECT_WITH_CUSTOM_CLASS(level, Class##level)
-
-#if defined(_MSC_VER)
-	#pragma warning (pop)
-#endif
 
 #endif //_LOG4CXX_LEVEL_H

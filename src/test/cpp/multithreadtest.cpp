@@ -19,32 +19,48 @@
 
 #include <log4cxx/logger.h>
 #include <log4cxx/logmanager.h>
-#include <log4cxx/simplelayout.h>
-#include <log4cxx/appenderskeleton.h>
+#include <log4cxx/patternlayout.h>
+#include <log4cxx/fileappender.h>
+#include <log4cxx/helpers/optionconverter.h>
 #include <thread>
 #include <vector>
 #include <random>
+#include <mutex>
 
-using log4cxx::Logger;
-using log4cxx::LoggerPtr;
-using log4cxx::LogManager;
+using namespace log4cxx;
 
-class NullWriterAppender : public log4cxx::AppenderSkeleton{
+//#define TEST_WITH_FLUENT_BIT
+#ifdef TEST_WITH_FLUENT_BIT
+#include <log4cxx/net/xmlsocketappender.h>
+#include <log4cxx/jsonlayout.h>
+class MyAppender : public net::XMLSocketAppender
+{
 public:
-	NullWriterAppender(){}
-
-	virtual void close(){}
-
-	virtual bool requiresLayout() const {
-		return false;
-	}
-
-	virtual void append(const log4cxx::spi::LoggingEventPtr& event, log4cxx::helpers::Pool& p){
-		// Do nothing but discard the data
+	MyAppender() : net::XMLSocketAppender(LOG4CXX_STR("127.0.0.1"), 5170)
+	{
+		auto layout = std::make_shared<JSONLayout>();
+		layout->setThreadInfo(true);
+		setLayout(layout);
 	}
 };
+#else
+class MyAppender : public FileAppender
+{
+public:
+	MyAppender()
+	{
+		auto tempDir = helpers::OptionConverter::getSystemProperty(LOG4CXX_STR("TEMP"), LOG4CXX_STR("/tmp"));
+		setFile(tempDir + LOG4CXX_STR("/") + LOG4CXX_STR("multithread_test.log"));
+		setLayout(std::make_shared<PatternLayout>(LOG4CXX_STR("%d [%t] %-5p %.16c - %m%n")));
+		setAppend(false);
+		setBufferedIO(true);
+		activateOptions();
+	}
+};
+#endif
 
-static void multithread_logger( int times ){
+static void multithread_logger( int times )
+{
 	/*
 	 * An explanation on this test: according to LOGCXX-322, calling
 	 * exit(0) (or equivalent) from a secondary thread causes a segfault.
@@ -56,20 +72,26 @@ static void multithread_logger( int times ){
 	 * fine.
 	 */
 
+	static std::once_flag exiting;
 	LoggerPtr logger = LogManager::getLogger( "test.multithreaded" );
 	std::random_device rd;
 	std::mt19937 gen(rd());
 	std::uniform_int_distribution<> distribution( 100, times );
 
-	for( int x = 0; x < times; x++ ){
-		LOG4CXX_INFO( logger, "This is a test message that has some data" );
-		if( distribution(gen) == x ){
-			std::exit(0);
+	for ( int x = 0; x < times; x++ )
+	{
+		LOG4CXX_INFO( logger, "This is test message " << x );
+
+		if ( distribution(gen) == x )
+		{
+			LOG4CXX_INFO( logger, "Exiting");
+			std::call_once(exiting, std::exit, 0);
 		}
 	}
 }
 
-LOGUNIT_CLASS(MultithreadTest){
+LOGUNIT_CLASS(MultithreadTest)
+{
 	LOGUNIT_TEST_SUITE(MultithreadTest);
 	LOGUNIT_TEST(testMultithreadedLoggers);
 	LOGUNIT_TEST_SUITE_END();
@@ -78,25 +100,27 @@ public:
 	void setUp()
 	{
 		Logger::getRootLogger()->removeAllAppenders();
-		std::shared_ptr<NullWriterAppender> nullWriter( new NullWriterAppender() );
-		Logger::getRootLogger()->addAppender( nullWriter );
+		Logger::getRootLogger()->addAppender( std::make_shared<MyAppender>() );
 	}
 
 	void tearDown()
 	{
-//		root->getLoggerRepository()->resetConfiguration();
 	}
 
-	void testMultithreadedLoggers(){
+	void testMultithreadedLoggers()
+	{
 		std::vector<std::thread> threads;
 
-		for( int x = 0; x < 6; x++ ){
+		for ( int x = 0; x < 6; x++ )
+		{
 			std::thread thr( multithread_logger, 20000 );
 			threads.push_back( std::move(thr) );
 		}
 
-		for( std::thread& thr : threads ){
-			if( thr.joinable() ){
+		for ( std::thread& thr : threads )
+		{
+			if ( thr.joinable() )
+			{
 				thr.join();
 			}
 		}

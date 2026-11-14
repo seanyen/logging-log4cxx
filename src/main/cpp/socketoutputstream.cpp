@@ -19,48 +19,63 @@
 #include <log4cxx/helpers/socketoutputstream.h>
 #include <log4cxx/helpers/socket.h>
 #include <log4cxx/helpers/bytebuffer.h>
+#include <log4cxx/helpers/exception.h>
 
 #include <cstdio>
 #include <cstring>
 
-using namespace log4cxx;
-using namespace log4cxx::helpers;
+using namespace LOG4CXX_NS;
+using namespace LOG4CXX_NS::helpers;
+
+struct SocketOutputStream::SocketOutputStreamPrivate
+{
+	ByteList array;
+	SocketPtr socket;
+};
 
 IMPLEMENT_LOG4CXX_OBJECT(SocketOutputStream)
 
 SocketOutputStream::SocketOutputStream(const SocketPtr& socket1)
-	: socket(socket1)
+	: m_priv(std::make_unique<SocketOutputStreamPrivate>())
 {
+	m_priv->socket = socket1;
 }
 
 SocketOutputStream::~SocketOutputStream()
 {
 }
 
-void SocketOutputStream::close(Pool& p)
+void SocketOutputStream::close(  )
 {
-	flush(p);
-	socket->close();
+	flush();
+	m_priv->socket->close();
 }
 
-void SocketOutputStream::flush(Pool& /* p */)
+void SocketOutputStream::flush(  )
 {
-	if (array.size() > 0)
+	if (m_priv->array.size() > 0)
 	{
-		ByteBuffer buf((char*) &array[0], array.size());
-		socket->write(buf);
-		array.resize(0);
+		ByteBuffer buf((char*) &m_priv->array[0], m_priv->array.size());
+		m_priv->socket->write(buf);
+		m_priv->array.resize(0);
 	}
 }
 
-void SocketOutputStream::write(ByteBuffer& buf, Pool& /* p */ )
+void SocketOutputStream::write( ByteBuffer& buf )
 {
 	if (buf.remaining() > 0)
 	{
-		size_t sz = array.size();
-		array.resize(sz + buf.remaining());
-		memcpy(&array[sz], buf.current(), buf.remaining());
-		buf.position(buf.limit());
+		const size_t count = buf.remaining();
+		const size_t sz = m_priv->array.size();
+
+		if (count > m_priv->array.max_size() - sz)
+		{
+			throw IllegalArgumentException(LOG4CXX_STR("SocketOutputStream::write overflow"));
+		}
+
+		m_priv->array.resize(sz + count);
+		memcpy(&m_priv->array[sz], buf.current(), count);
+		buf.increment_position(count);
 	}
 }
 

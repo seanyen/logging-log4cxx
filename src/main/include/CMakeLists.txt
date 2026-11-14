@@ -1,39 +1,44 @@
-# Configure
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#       http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
 
-if(WIN32)
-    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/log4cxx/version_info.h.in
-	           ${CMAKE_CURRENT_BINARY_DIR}/log4cxx/version_info.h
-		   @ONLY
-    )
-    set(LOG4CXX_CHAR "utf-8" CACHE STRING "Interal character representation, choice of utf-8, wchar_t(default), unichar")
-    set_property(CACHE LOG4CXX_CHAR PROPERTY STRINGS "utf-8" "wchar_t" "unichar")
-    set(LOGCHAR_IS_UNICHAR 0)
-    set(LOGCHAR_IS_WCHAR 1)
-    set(LOGCHAR_IS_UTF8 0)
+set(GENERATED_HEADERS)
+
+# Configure log4cxx.h
+
+set(LOG4CXX_CHAR "utf-8" CACHE STRING "LogString character type")
+set_property(CACHE LOG4CXX_CHAR PROPERTY STRINGS "utf-8" "wchar_t")
+if(${LOG4CXX_CHAR} STREQUAL "wchar_t")
+  set(LOGCHAR_IS_WCHAR 1)
+  set(LOGCHAR_IS_UTF8 0)
 else()
-    set(LOG4CXX_CHAR "utf-8" CACHE STRING "Interal character representation, choice of utf-8 (default), wchar_t, unichar")
-    set_property(CACHE LOG4CXX_CHAR PROPERTY STRINGS "utf-8" "wchar_t" "unichar")
-    set(LOGCHAR_IS_UNICHAR 0)
     set(LOGCHAR_IS_WCHAR 0)
     set(LOGCHAR_IS_UTF8 1)
 endif()
 
-# Configure log4cxx.h
-
-if(${LOG4CXX_CHAR} STREQUAL "unichar")
-  set(LOGCHAR_IS_UNICHAR 1)
-elseif(${LOG4CXX_CHAR} STREQUAL "wchar_t")
-  set(LOGCHAR_IS_WCHAR 1)
-endif()
 option(LOG4CXX_WCHAR_T "Enable wchar_t API methods" ON)
-option(LOG4CXX_UNICHAR "Enable UniChar API methods" OFF)
 set(INIT_IOS_BASE 0)
 if(APPLE)
-option(LOG4CXX_CFSTRING "Enable CFString API methods, requires Mac OS/X CoreFoundation" OFF)
-set(INIT_IOS_BASE 1)
+  option(LOG4CXX_CFSTRING "Enable CFString API methods, requires Mac OS/X CoreFoundation" OFF)
+  if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
+    set(INIT_IOS_BASE 1)
+  endif()
 endif()
 set(CHAR_API 1)
-foreach(varName WCHAR_T  UNICHAR  CFSTRING )
+foreach(varName WCHAR_T  CFSTRING )
   if(${LOG4CXX_${varName}})
     set("${varName}_API" 1)
   else()
@@ -41,10 +46,55 @@ foreach(varName WCHAR_T  UNICHAR  CFSTRING )
   endif()
 endforeach()
 
+option(LOG4CXX_NETWORKING_SUPPORT "Support logging over a network socket" ON)
+if(LOG4CXX_NETWORKING_SUPPORT)
+    set(NETWORKING_SUPPORT 1)
+else()
+    set(NETWORKING_SUPPORT 0)
+endif()
+
+option(LOG4CXX_DOMCONFIGURATOR_SUPPORT "Support XML as a configuration method" ON)
+if(LOG4CXX_DOMCONFIGURATOR_SUPPORT)
+    set(DOMCONFIGURATOR_SUPPORT 1)
+else()
+    set(DOMCONFIGURATOR_SUPPORT 0)
+endif()
+
+if(ENABLE_FMT_LAYOUT)
+    set(FMT_LAYOUT_SUPPORT 1)
+else()
+    set(FMT_LAYOUT_SUPPORT 0)
+endif()
+
+option(LOG4CXX_MULTIPROCESS_ROLLING_FILE_APPENDER "Support multiple processes logging to the same file" OFF)
+if(LOG4CXX_MULTIPROCESS_ROLLING_FILE_APPENDER)
+    set(MULTIPROCESS_RFA 1)
+else()
+    set(MULTIPROCESS_RFA 0)
+endif()
+
+option(LOG4CXX_EVENTS_AT_EXIT "Prevent static data cleanup to allow event logging during application exit" OFF)
+if(LOG4CXX_EVENTS_AT_EXIT )
+    set(EVENTS_AT_EXIT 1)
+else()
+    set(EVENTS_AT_EXIT 0)
+endif()
+
+set(LOG4CXX_DECLARE_DEFAULT_NS_ALIAS 0)
+if(NOT "log4cxx" STREQUAL "${LOG4CXX_NS}")
+    set(LOG4CXX_DECLARE_DEFAULT_NS_ALIAS 1)
+endif()
+
+set(LOG4CXX_FORMAT_NAMESPACE "fmt" CACHE STRING "format() function namespace, choice of fmt (default), std")
+set_property(CACHE LOG4CXX_FORMAT_NAMESPACE PROPERTY STRINGS "fmt" "std")
+set(LOG4CXX_USE_STANDARD_FORMAT 0)
+if("std" STREQUAL "${LOG4CXX_FORMAT_NAMESPACE}")
+    set(LOG4CXX_USE_STANDARD_FORMAT 1)
+endif()
 
 # Configure log4cxx_private.h
-set(LOG4CXX_CHARSET "locale" CACHE STRING "LogString characters, choice of locale (default), utf-8, ISO-8859-1, US-ASCII, EBCDIC")
-set_property(CACHE LOG4CXX_CHARSET PROPERTY STRINGS "locale" "utf-8" "ISO-8859-1" "US-ASCII" "EBCDIC")
+set(LOG4CXX_CHARSET "utf-8" CACHE STRING "LogString characters, choice of utf-8 (default), ISO-8859-1, US-ASCII, EBCDIC, locale")
+set_property(CACHE LOG4CXX_CHARSET PROPERTY STRINGS "utf-8" "ISO-8859-1" "US-ASCII" "EBCDIC" "locale")
 set(CHARSET_EBCDIC 0)
 set(CHARSET_USASCII 0)
 set(CHARSET_ISO88591 0)
@@ -64,30 +114,21 @@ endif()
 #
 include(CheckFunctionExists)
 include(CheckCXXSymbolExists)
-include(CheckIncludeFiles)
 include(CheckIncludeFileCXX)
 include(CheckLibraryExists)
 
-if(WIN32)
-	CHECK_INCLUDE_FILES(sqlext.h HAS_ODBC)
-else()
-	include(FindPkgConfig)
-
-	pkg_check_modules( odbc QUIET odbc )
-	if(${odbc_FOUND})
-		set(HAS_ODBC 1)
-	endif(${odbc_FOUND})
-endif(WIN32)
-
 CHECK_INCLUDE_FILE_CXX(locale HAS_STD_LOCALE)
-CHECK_FUNCTION_EXISTS(mbsrtowcs HAS_MBSRTOWCS)
-CHECK_FUNCTION_EXISTS(wcstombs HAS_WCSTOMBS)
-CHECK_FUNCTION_EXISTS(fwide HAS_FWIDE)
-CHECK_LIBRARY_EXISTS(esmtp smtp_create_session "" HAS_LIBESMTP)
-CHECK_FUNCTION_EXISTS(syslog HAS_SYSLOG)
-if(UNIX)
+CHECK_SYMBOL_EXISTS(mbsrtowcs "cwchar" HAS_MBSRTOWCS)
+CHECK_SYMBOL_EXISTS(wcstombs "cstdlib" HAS_WCSTOMBS)
+CHECK_SYMBOL_EXISTS(fwide "cwchar" HAS_FWIDE )
+CHECK_SYMBOL_EXISTS(syslog "syslog.h" HAS_SYSLOG)
+if(NOT MSVC)
     set(CMAKE_REQUIRED_LIBRARIES "pthread")
-    CHECK_SYMBOL_EXISTS(pthread_sigmask "signal.h" HAS_PTHREAD_SIGMASK)
+    # pthread_sigmask exists on MINGW but with no function
+    if(NOT MINGW)
+        CHECK_SYMBOL_EXISTS(pthread_sigmask "signal.h" HAS_PTHREAD_SIGMASK)
+    endif()
+    CHECK_SYMBOL_EXISTS(pthread_self "pthread.h" HAS_PTHREAD_SELF)
 
     # Check for the (linux) pthread_setname_np.
     # OSX and BSD are special apparently.  OSX only lets you name
@@ -95,87 +136,86 @@ if(UNIX)
     # Since this is really not a core feature and the end-user can configure
     # it anyway, we're only going to worry about linux.
     include(${LOG4CXX_SOURCE_DIR}/src/cmake/pthread/log4cxx-pthread.cmake)
-    if(${PTHREAD_SETNAME_NP_FOUND})
-	set(HAS_PTHREAD_SETNAME 1)
-    endif()
-endif(UNIX)
+endif()
 
-if(WIN32)
-    CHECK_SYMBOL_EXISTS(SetThreadDescription "windows.h;processthreadsapi.h" HAS_SETTHREADDESCRIPTION)
-endif(WIN32)
-
-foreach(varName HAS_STD_LOCALE  HAS_ODBC  HAS_MBSRTOWCS  HAS_WCSTOMBS  HAS_FWIDE  HAS_LIBESMTP  HAS_SYSLOG HAS_PTHREAD_SIGMASK HAS_PTHREAD_SETNAME HAS_SETTHREADDESCRIPTION)
+foreach(varName
+  HAS_THREAD_LOCAL
+  HAS_STD_LOCALE
+  HAS_ODBC
+  HAS_MBSRTOWCS
+  HAS_WCSTOMBS
+  HAS_FWIDE
+  HAS_LIBESMTP
+  HAS_SYSLOG
+  HAS_PTHREAD_SELF
+  HAS_PTHREAD_SIGMASK
+  HAS_PTHREAD_SETNAME
+  HAS_PTHREAD_GETNAME
+  HAS_PTHREAD_GETHANDLE
+  ENABLE_FMT_ASYNC
+  )
   if(${varName} EQUAL 0)
     continue()
   elseif(${varName} EQUAL 1)
     continue()
-  elseif("${varName}" STREQUAL "ON")
+  elseif(${varName} STREQUAL "ON" OR ${varName} STREQUAL "TRUE")
     set(${varName} 1 )
-  elseif("${varName}" STREQUAL "OFF")
-    set(${varName} 0 )
-  else()
+ else()
     set(${varName} 0 )
   endif()
 endforeach()
 
-# Check for standard headers that we need, fall back to boost if they're not found
-include(${LOG4CXX_SOURCE_DIR}/src/cmake/boost-fallback/boost-fallback.cmake)
-set(NAMESPACE_ALIAS log4cxx)
-
-if( ${STD_THREAD_FOUND} )
-    set( THREAD_IMPL "std::thread" )
-elseif( ${Boost_THREAD_FOUND} )
-    set( THREAD_IMPL "boost::thread" )
-else()
-    set( THREAD_IMPL "NONE" )
-endif()
-
-if( ${STD_MUTEX_FOUND} )
-    set( MUTEX_IMPL "std::mutex" )
-elseif( ${Boost_MUTEX_FOUND} )
-    set( MUTEX_IMPL "boost::mutex" )
-else()
-    set( MUTEX_IMPL "NONE" )
-endif()
-
-if( ${STD_SHARED_PTR_FOUND} )
-    set( SMART_PTR_IMPL "std::shared_ptr" )
-elseif( ${Boost_SHARED_PTR_FOUND} )
-    set( SMART_PTR_IMPL "boost::shared_ptr" )
-else()
-    set( SMART_PTR_IMPL "NONE" )
-endif()
-
-if( ${STD_SHARED_MUTEX_FOUND} )
-    set( SHARED_MUTEX_IMPL "std::shared_mutex" )
-elseif( ${Boost_SHARED_MUTEX_FOUND} )
-    set( SHARED_MUTEX_IMPL "boost::shared_mutex" )
-else()
-    set( SHARED_MUTEX_IMPL "NONE" )
-endif()
-
-if( ${STD_ATOMIC_FOUND} )
-    set( ATOMIC_IMPL "std::atomic" )
-elseif( ${Boost_ATOMIC_FOUND} )
-    set( ATOMIC_IMPL "boost::atomic" )
-else()
-    set( ATOMIC_IMPL "NONE" )
-endif()
-
 # Configure both our private header and our public header
+configure_file(${LOG4CXX_SOURCE_DIR}/src/cmake/compiler-features/makeunique.h.cmake
+               ${CMAKE_CURRENT_BINARY_DIR}/log4cxx/helpers/makeunique.h
+)
+list(APPEND GENERATED_HEADERS ${CMAKE_CURRENT_BINARY_DIR}/log4cxx/helpers/makeunique.h)
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/log4cxx/private/log4cxx_private.h.in
                ${CMAKE_CURRENT_BINARY_DIR}/log4cxx/private/log4cxx_private.h
                @ONLY
 )
+list(APPEND GENERATED_HEADERS ${CMAKE_CURRENT_BINARY_DIR}/log4cxx/private/log4cxx_private.h)
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/log4cxx/log4cxx.h.in
                ${CMAKE_CURRENT_BINARY_DIR}/log4cxx/log4cxx.h
-	       @ONLY
+               @ONLY
 )
-configure_file(${LOG4CXX_SOURCE_DIR}/src/cmake/boost-fallback/boost-std-configuration.h.cmake
-                ${CMAKE_CURRENT_BINARY_DIR}/log4cxx/boost-std-configuration.h
-)
+list(APPEND GENERATED_HEADERS ${CMAKE_CURRENT_BINARY_DIR}/log4cxx/log4cxx.h)
 
-# Provide the dependencies
-add_custom_target(configure_log4cxx
-  COMMAND "${CMAKE_COMMAND}" -E echo "Checking configuration"
+if(WIN32)
+    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/log4cxx/version_info.h.in
+        ${CMAKE_CURRENT_BINARY_DIR}/log4cxx/version_info.h
+        @ONLY
+    )
+    list(APPEND GENERATED_HEADERS ${CMAKE_CURRENT_BINARY_DIR}/log4cxx/version_info.h)
+endif()
+
+# A target for the convenience of working with headers in the IDE
+file(GENERATE
+     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/empty-lib-stub.cpp
+     CONTENT "namespace {int someUnused{};}\n"
 )
+file(GLOB_RECURSE HEADERS log4cxx/*)
+if(NOT LOG4CXX_DOMCONFIGURATOR_SUPPORT)
+    list(REMOVE_ITEM HEADERS "xml/domconfigurator.h")
+endif()
+add_library(log4cxx-include STATIC ${HEADERS} ${GENERATED_HEADERS} ${CMAKE_CURRENT_BINARY_DIR}/empty-lib-stub.cpp)
+target_include_directories(log4cxx-include PUBLIC . ${CMAKE_CURRENT_BINARY_DIR})
+
+# And the same for Qt
+option(LOG4CXX_QT_SUPPORT "Qt support/integration" OFF)
+if(LOG4CXX_QT_SUPPORT)
+	file(GLOB_RECURSE HEADERS_QT log4cxx-qt/*)
+	add_library(log4cxx-qt-include STATIC ${HEADERS_QT} ${CMAKE_CURRENT_BINARY_DIR}/empty-lib-stub.cpp)
+	target_include_directories(log4cxx-qt-include PUBLIC . ${CMAKE_CURRENT_BINARY_DIR})
+	add_dependencies(log4cxx-qt-include log4cxx-include)
+endif()
+
+# A list of public header files
+set(PUBLIC_HEADER_FILES ${HEADERS} ${GENERATED_HEADERS} ${HEADERS_QT})
+list(FILTER PUBLIC_HEADER_FILES EXCLUDE REGEX ".*/private/.*")
+foreach(file ${PUBLIC_HEADER_FILES} )
+  file(APPEND ${CMAKE_CURRENT_BINARY_DIR}/../abi-symbols/public_header_files.txt
+     "${file}\n"
+  )
+endforeach()
+

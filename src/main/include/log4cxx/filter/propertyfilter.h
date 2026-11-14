@@ -19,16 +19,10 @@
 #ifndef _LOG4CXX_FILTER_PROPERTYFILTER_H
 #define _LOG4CXX_FILTER_PROPERTYFILTER_H
 
-#if defined(_MSC_VER)
-	#pragma warning (push)
-	#pragma warning ( disable: 4231 4251 4275 4786 )
-#endif
-
-
 #include <log4cxx/spi/filter.h>
 #include <map>
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 namespace filter
 {
@@ -50,7 +44,7 @@ namespace filter
  *
  *
  */
-class LOG4CXX_EXPORT PropertyFilter : public log4cxx::spi::Filter
+class LOG4CXX_EXPORT PropertyFilter : public LOG4CXX_NS::spi::Filter
 {
 		typedef std::map < LogString, LogString > PropertyMap;
 		PropertyMap* properties;
@@ -60,22 +54,18 @@ class LOG4CXX_EXPORT PropertyFilter : public log4cxx::spi::Filter
 	public:
 		DECLARE_LOG4CXX_OBJECT(PropertyFilter)
 		BEGIN_LOG4CXX_CAST_MAP()
-		LOG4CXX_CAST_ENTRY(log4cxx::spi::Filter)
+		LOG4CXX_CAST_ENTRY(LOG4CXX_NS::spi::Filter)
 		END_LOG4CXX_CAST_MAP()
 
 		PropertyFilter();
 		~PropertyFilter();
 		void setProperties(const LogString& props);
 
-		FilterDecision decide(const spi::LoggingEventPtr& event) const;
+		FilterDecision decide(const spi::LoggingEventPtr& event) const override;
 
 };
 
 }
 }
-
-#if defined(_MSC_VER)
-	#pragma warning (pop)
-#endif
 
 #endif

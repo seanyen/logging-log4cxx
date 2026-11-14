@@ -19,12 +19,8 @@
 #define _LOG4CXX_VARIA_FALLBACK_ERROR_HANDLER_H
 
 #include <log4cxx/spi/errorhandler.h>
-#include <log4cxx/helpers/object.h>
-#include <log4cxx/appender.h>
-#include <log4cxx/logger.h>
-#include <vector>
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 namespace varia
 {
@@ -36,15 +32,16 @@ whatever reason.
 
 <p>The error message is printed on <code>System.err</code>, and
 logged in the new secondary appender.
+
+Here is a sample configuration file that installs this error handler:
+\anchor fallback-ref-example
+\include async-fall-back-example.xml
 */
-class LOG4CXX_EXPORT FallbackErrorHandler :
-	public virtual spi::ErrorHandler,
-	public virtual helpers::Object
+class LOG4CXX_EXPORT FallbackErrorHandler
+	: public spi::ErrorHandler
 {
 	private:
-		AppenderWeakPtr backup;
-		AppenderWeakPtr primary;
-		std::vector<LoggerPtr> loggers;
+		LOG4CXX_DECLARE_PRIVATE_MEMBER_PTR(FallbackErrorHandlerPrivate, m_priv)
 
 	public:
 		DECLARE_LOG4CXX_OBJECT(FallbackErrorHandler)
@@ -54,51 +51,63 @@ class LOG4CXX_EXPORT FallbackErrorHandler :
 		END_LOG4CXX_CAST_MAP()
 
 		FallbackErrorHandler();
+		~FallbackErrorHandler();
+
+		/**
+		Add \c clx to the list of collections to search for the failed appender.
+		@param name used in log messages.
+		@param clx has a collection of appenders.
+		*/
+		void addAppenderHolder(const LogString& name, const spi::AppenderAttachablePtr& clx) override;
 
 		/**
 		<em>Adds</em> the logger passed as parameter to the list of
 		loggers that we need to search for in case of appender failure.
 		*/
-		void setLogger(const LoggerPtr& logger);
+		void setLogger(const LoggerPtr& logger) override;
 
+		/** Write \c context and \c e to stderr and attempt switch to the fallback appender.
 
-		/**
-		No options to activate.
+		On the first call to this method,
+		the primary appender is replaced by the backup appender
+		and \c event is sent to the backup appender.
 		*/
-		void activateOptions(log4cxx::helpers::Pool& p);
-		void setOption(const LogString& option, const LogString& value);
+		void error
+			( const LogString&            context
+			, const std::exception&       e
+			, spi::ErrorCode              category
+			, const spi::LoggingEventPtr& event
+			) override;
 
+		/** Write \c context and \c e to stderr and attempt switch to the fallback appender.
 
-		/**
-		Prints the message and the stack trace of the exception on
-		<code>System.err</code>.
+		On the first call to this method,
+		the primary appender is replaced by the backup appender.
 		*/
-		void error(const LogString& message, const std::exception& e,
-			int errorCode) const;
+		void error
+			( const LogString&      context
+			, const std::exception& e
+			, spi::ErrorCode        category
+			) override;
 
-		/**
-		Prints the message and the stack trace of the exception on
-		<code>System.err</code>.
+		/** Write \c message to stderr.
 		*/
-		void error(const LogString& message, const std::exception& e,
-			int errorCode, const spi::LoggingEventPtr& event) const;
-
-
-		/**
-		Print a the error message passed as parameter on
-		<code>System.err</code>.
-		*/
-		void error(const LogString& /* message */) const {}
+		void error(const LogString& message, spi::ErrorCode category) override;
 
 		/**
 		The appender to which this error handler is attached.
 		*/
-		void setAppender(const AppenderPtr& primary);
+		void setAppender(const AppenderPtr& primary) override;
 
 		/**
 		Set the backup appender.
 		*/
-		void setBackupAppender(const AppenderPtr& backup);
+		void setBackupAppender(const AppenderPtr& backup) override;
+
+		/**
+		Has an error been reported?
+		*/
+		bool errorReported() const override;
 };
 LOG4CXX_PTR_DEF(FallbackErrorHandler);
 

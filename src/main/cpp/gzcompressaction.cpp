@@ -19,26 +19,54 @@
 #include <apr_thread_proc.h>
 #include <apr_strings.h>
 #include <log4cxx/helpers/exception.h>
+#include <log4cxx/helpers/pool.h>
 #include <log4cxx/helpers/transcoder.h>
+#include <log4cxx/private/action_priv.h>
+#include <log4cxx/helpers/loglog.h>
 
-using namespace log4cxx;
-using namespace log4cxx::rolling;
-using namespace log4cxx::helpers;
+using namespace LOG4CXX_NS;
+using namespace LOG4CXX_NS::rolling;
+using namespace LOG4CXX_NS::helpers;
+
+#define priv static_cast<GZCompressActionPrivate*>(m_priv.get())
+
+struct GZCompressAction::GZCompressActionPrivate : public ActionPrivate
+{
+	GZCompressActionPrivate
+		( const File& toRename
+		, const File& renameTo
+		, bool deleteSource
+		)
+		: ActionPrivate{ LOG4CXX_STR("gzip") }
+		, source(toRename)
+		, destination(renameTo)
+		, deleteSource(deleteSource)
+		{}
+
+	const File source;
+	File destination;
+	bool deleteSource;
+	bool throwIOExceptionOnForkFailure = true;
+};
 
 IMPLEMENT_LOG4CXX_OBJECT(GZCompressAction)
 
 GZCompressAction::GZCompressAction(const File& src,
 	const File& dest,
 	bool del)
-	: source(src), destination(dest), deleteSource(del)
+	: Action(std::make_unique<GZCompressActionPrivate>(
+			  src, dest, del))
 {
 }
 
-bool GZCompressAction::execute(log4cxx::helpers::Pool& p) const
+GZCompressAction::~GZCompressAction() {}
+
+bool GZCompressAction::execute(  ) const
 {
-	if (source.exists(p))
+	if (priv->source.exists())
 	{
-		apr_pool_t* aprpool = p.getAPRPool();
+		helpers::Pool tempPool;
+		apr_pool_t* aprpool = tempPool.getAPRPool();
 		apr_procattr_t* attr;
 		apr_status_t stat = apr_procattr_create(&attr, aprpool);
 
@@ -67,11 +95,11 @@ bool GZCompressAction::execute(log4cxx::helpers::Pool& p) const
 		apr_file_t* child_out;
 		apr_int32_t flags = APR_FOPEN_READ | APR_FOPEN_WRITE |
 			APR_FOPEN_CREATE | APR_FOPEN_TRUNCATE;
-		stat = destination.open(&child_out, flags, APR_OS_DEFAULT, p);
+		stat = apr_file_open(&child_out, priv->destination.getAPRPath(), flags, APR_OS_DEFAULT, aprpool);
 
 		if (stat != APR_SUCCESS)
 		{
-			throw IOException(stat);
+			throw IOException(priv->destination.getName(), stat);
 		}
 
 		stat =  apr_procattr_child_out_set(attr, child_out, NULL);
@@ -97,24 +125,38 @@ bool GZCompressAction::execute(log4cxx::helpers::Pool& p) const
 			}
 		}
 
-		const char** args = (const char**)
-			apr_palloc(aprpool, 4 * sizeof(*args));
+		priv->destination.setAutoDelete(true);
+
+		const char* args[4];
 		int i = 0;
 		args[i++] = "gzip";
 		args[i++] = "-c";
-		args[i++] = Transcoder::encode(source.getPath(), p);
+		args[i++] = priv->source.getAPRPath();
 		args[i++] = NULL;
-
 
 		apr_proc_t pid;
 		stat = apr_proc_create(&pid, "gzip", args, NULL, attr, aprpool);
 
 		if (stat != APR_SUCCESS)
 		{
-			throw IOException(stat);
+			LogLog::warn(LOG4CXX_STR("Failed to fork gzip during log rotation; leaving log file uncompressed"));
+			if (priv->throwIOExceptionOnForkFailure)
+				throw IOException(LOG4CXX_STR("gzip"), stat);
+			/* If we fail here (to create the gzip child process),
+			 * skip the compression and consider the rotation to be
+			 * otherwise successful. The caller has already rotated
+			 * the log file (`source` here refers to the
+			 * uncompressed, rotated path, and `destination` the
+			 * same path with `.gz` appended). Remove the empty
+			 * destination file and leave source as-is.
+			 */
+			stat = apr_file_close(child_out);
+			return true;
 		}
 
-		apr_proc_wait(&pid, NULL, NULL, APR_WAIT);
+		int exitCode = 0;
+		apr_exit_why_e reason;
+		apr_proc_wait(&pid, &exitCode, &reason, APR_WAIT);
 		stat = apr_file_close(child_out);
 
 		if (stat != APR_SUCCESS)
@@ -122,14 +164,25 @@ bool GZCompressAction::execute(log4cxx::helpers::Pool& p) const
 			throw IOException(stat);
 		}
 
-		if (deleteSource)
+		if (exitCode != 0)
 		{
-			source.deleteFile(p);
+			throw SubProcessFailure(LOG4CXX_STR("gzip"), exitCode, reason);
+		}
+
+		priv->destination.setAutoDelete(false);
+
+		if (priv->deleteSource)
+		{
+			priv->source.deleteFile();
 		}
 
 		return true;
 	}
 
 	return false;
+}
+
+void GZCompressAction::setThrowIOExceptionOnForkFailure(bool throwIO){
+	priv->throwIOExceptionOnForkFailure = throwIO;
 }
 

@@ -14,9 +14,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#if defined(_MSC_VER)
-	#pragma warning ( disable: 4231 4251 4275 4786 )
-#endif
 
 #include <log4cxx/logstring.h>
 #include "num343patternconverter.h"
@@ -40,11 +37,8 @@ PatternConverterPtr Num343PatternConverter::newInstance(
 }
 
 
-void Num343PatternConverter::format(
-	const spi::LoggingEventPtr&,
-	LogString& sbuf,
-	Pool&) const
+void Num343PatternConverter::format( const spi::LoggingEventPtr& event, LogString& toAppendTo ) const
 {
-	sbuf.append(LOG4CXX_STR("343"));
+	toAppendTo.append(LOG4CXX_STR("343"));
 }
 

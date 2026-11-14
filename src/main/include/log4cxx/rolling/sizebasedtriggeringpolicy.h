@@ -20,7 +20,7 @@
 
 #include <log4cxx/rolling/triggeringpolicy.h>
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 
 class File;
@@ -64,18 +64,37 @@ class LOG4CXX_EXPORT SizeBasedTriggeringPolicy : public TriggeringPolicy
 		 * @param fileLength Length of the file in bytes.
 		 * @return true if a rollover should occur.
 		 */
-		virtual bool isTriggeringEvent(
+		bool isTriggeringEvent(
 			Appender* appender,
-			const log4cxx::spi::LoggingEventPtr& event,
+			const spi::LoggingEventPtr& event,
 			const LogString& filename,
-			size_t fileLength);
+			size_t fileLength) override;
 
 		size_t getMaxFileSize();
 
 		void setMaxFileSize(size_t l);
 
-		void activateOptions(log4cxx::helpers::Pool&);
-		void setOption(const LogString& option, const LogString& value);
+		using TriggeringPolicy::activateOptions;
+		/**
+		\copybrief TriggeringPolicy::activateOptions()
+
+		No action is performed in this implementation.
+		*/
+		void activateOptions(  ) override;
+
+		/**
+		\copybrief spi::OptionHandler::setOption()
+
+		Supported options | Supported values | Default value |
+		-------------- | ---------------- | --------------- |
+		MaxFileSize | (\ref fileSize "1") | 10 MB |
+
+		\anchor fileSize (1) An integer in the range 0 - 2^63.
+		 You can specify the value with the suffixes "KB", "MB", "GB" or "TB" so that the integer is
+		 interpreted being expressed respectively in kilobytes, megabytes, gigabytes
+		 or terabytes. For example, the value "10KB" will be interpreted as 10240.
+		*/
+		void setOption(const LogString& option, const LogString& value) override;
 };
 
 LOG4CXX_PTR_DEF(SizeBasedTriggeringPolicy);

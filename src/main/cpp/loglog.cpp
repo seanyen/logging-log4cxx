@@ -17,6 +17,7 @@
 
 #include <log4cxx/logstring.h>
 #include <log4cxx/helpers/loglog.h>
+#include <log4cxx/logmanager.h>
 #include <log4cxx/helpers/transcoder.h>
 #include <iostream>
 #if !defined(LOG4CXX)
@@ -24,130 +25,285 @@
 #endif
 #include <log4cxx/private/log4cxx_private.h>
 #include <log4cxx/helpers/aprinitializer.h>
+#include <log4cxx/helpers/date.h>
+#include <log4cxx/helpers/stringhelper.h>
 #include <log4cxx/helpers/systemerrwriter.h>
+#include <log4cxx/helpers/optionconverter.h>
 #include <mutex>
 
-using namespace log4cxx;
-using namespace log4cxx::helpers;
+using namespace LOG4CXX_NS;
+using namespace LOG4CXX_NS::helpers;
 
-LogLog::LogLog()
+struct LogLog::LogLogPrivate
 {
-	debugEnabled    = false;
-	quietMode       = false;
+	LogLogPrivate()
+		: startTime{ APRInitializer::getStartTime() }
+	{}
+
+	~LogLogPrivate()
+	{
+		quietMode = true; // Prevent output after deletion by onexit processing chain.
+	}
+
+	static LogLog* parent;
+
+	static LogLogPrivate* getInstance()
+	{
+		if (!parent)
+			return nullptr;
+		return parent->m_priv.get();
+	}
+
+	log4cxx_time_t startTime;
+
+	bool debugEnabled{ false };
+
+	bool timeStampEnabled{ true };
+
+	/**
+		   In quietMode not even errors generate any output.
+	 */
+	bool quietMode{ false };
+	std::mutex mutex;
+	LogString errorPrefix;
+	LogString warnPrefix;
+	LogString debugPrefix;
+	LogString suffix;
+	void setColorEnabled(bool newValue)
+	{
+		if (newValue)
+		{
+			this->errorPrefix = LOG4CXX_STR("\x1B[31m"); //red
+			this->warnPrefix = LOG4CXX_STR("\x1B[33m"); //yellow
+			this->debugPrefix = LOG4CXX_STR("\x1B[32m"); //green
+			this->suffix = LOG4CXX_STR("\x1B[0m"); // none
+		}
+		else
+		{
+			this->errorPrefix.clear();
+			this->warnPrefix.clear();
+			this->debugPrefix.clear();
+			this->suffix.clear();
+		}
+	}
+
+	LogString elapsedMicroseconds()
+	{
+		LogString result;
+		if (this->timeStampEnabled)
+		{
+			auto microsecondInterval = Date::currentTime() - this->startTime;
+			StringHelper::toString(microsecondInterval, result);
+			result += ' ';
+		}
+		return result;
+	}
+
+	void emit_log(const LogString& prefix, const LogString& msg, const LogString& suffix);
+
+	void emit_log(const LogString& prefix, const LogString& msg, const std::exception& ex, const LogString& suffix);
+};
+
+LogLog* LogLog::LogLogPrivate::parent{ nullptr };
+
+LogLog::LogLog() :
+	m_priv(std::make_unique<LogLogPrivate>())
+{
+	LogString log4cxxDebug = OptionConverter::getSystemProperty(LOG4CXX_STR("LOG4CXX_DEBUG"), LOG4CXX_STR("false"));
+	m_priv->debugEnabled = OptionConverter::toBoolean(log4cxxDebug, false);
+	auto logLogTimestamps = OptionConverter::getSystemProperty(LOG4CXX_STR("LOG4CXX_DEBUG_TIMESTAMPS"), LOG4CXX_STR("true"));
+	m_priv->timeStampEnabled = OptionConverter::toBoolean(logLogTimestamps, true);
+	auto color = OptionConverter::getSystemProperty(LOG4CXX_STR("LOG4CXX_COLOR"), LOG4CXX_STR("true"));
+	m_priv->setColorEnabled(OptionConverter::toBoolean(color, true));
 }
 
-LogLog& LogLog::getInstance()
+LogLog::~LogLog()
 {
-	static LogLog internalLogger;
+	LogLogPrivate::parent = nullptr;
+}
 
-	return internalLogger;
+ObjectPtr LogLog::_createInstance()
+{
+	using LogLogHolder = SingletonHolder<LogLog>;
+	auto pLogLog = std::make_shared<LogLogHolder>();
+	LogLogPrivate::parent = &pLogLog->value();
+	debug(LOG4CXX_STR("Started"));
+	return pLogLog;
+}
+
+bool LogLog::isDebugEnabled()
+{
+	auto p = LogLogPrivate::getInstance();
+	return p && !p->quietMode // Not deleted by onexit processing?
+			 && p->debugEnabled;
+}
+
+bool LogLog::isDebugEnabledFor(const LabelPtr& category)
+{
+	return isDebugEnabled() && category && category->isDebugEnabled();
+}
+
+bool LogLog::isTraceEnabledFor(const LabelPtr& category)
+{
+	return isDebugEnabled() && category && category->isTraceEnabled();
 }
 
 void LogLog::setInternalDebugging(bool debugEnabled1)
 {
-	std::unique_lock<std::mutex> lock(getInstance().mutex);
+	auto p = LogLogPrivate::getInstance();
+	if (p && !p->quietMode) // Not deleted by onexit processing?
+		p->debugEnabled = debugEnabled1;
+}
 
-	getInstance().debugEnabled = debugEnabled1;
+bool LogLog::isColorEnabled()
+{
+	auto p = LogLogPrivate::getInstance();
+	return p && !p->errorPrefix.empty();
+}
+
+void LogLog::setColorEnabled(bool newValue)
+{
+	if (auto p = LogLogPrivate::getInstance())
+		p->setColorEnabled(newValue);
 }
 
 void LogLog::debug(const LogString& msg)
 {
-	if (!getInstance().debugEnabled)
+	auto p = LogLogPrivate::getInstance();
+	if (p && !p->quietMode) // Not deleted by onexit processing?
 	{
-		return;
+		if (!p->debugEnabled)
+		{
+			return;
+		}
+
+		std::lock_guard<std::mutex> lock(p->mutex);
+		p->emit_log(p->debugPrefix, msg, p->suffix);
 	}
-
-	std::unique_lock<std::mutex> lock(getInstance().mutex);
-
-	emit(msg);
 }
 
 void LogLog::debug(const LogString& msg, const std::exception& e)
 {
-	if (!getInstance().debugEnabled)
+	auto p = LogLogPrivate::getInstance();
+	if (p && !p->quietMode) // Not deleted by onexit processing?
 	{
-		return;
+		if (!p->debugEnabled)
+			return;
+
+		std::lock_guard<std::mutex> lock(p->mutex);
+		p->emit_log(p->debugPrefix, msg, e, p->suffix);
 	}
-
-	std::unique_lock<std::mutex> lock(getInstance().mutex);
-
-	emit(msg);
-	emit(e);
 }
 
 
 void LogLog::error(const LogString& msg)
 {
-	std::unique_lock<std::mutex> lock(getInstance().mutex);
+	auto p = LogLogPrivate::getInstance();
+	if (p && !p->quietMode) // Not deleted by onexit processing?
+	{
+		std::lock_guard<std::mutex> lock(p->mutex);
 
-	emit(msg);
+		p->emit_log(p->errorPrefix, msg, p->suffix);
+	}
 }
 
 void LogLog::error(const LogString& msg, const std::exception& e)
 {
-	std::unique_lock<std::mutex> lock(getInstance().mutex);
+	auto p = LogLogPrivate::getInstance();
+	if (p && !p->quietMode) // Not deleted by onexit processing?
+	{
+		std::lock_guard<std::mutex> lock(p->mutex);
+		p->emit_log(p->errorPrefix, msg, e, p->suffix);
+	}
+}
 
-	emit(msg);
-	emit(e);
+auto LogLog::getCategory(const LogString& name) -> LabelPtr
+{
+	return LogManager::getLoggerRepository()->getLogger(name);
+}
+
+#if !LOG4CXX_LOGCHAR_IS_UTF8
+void LogLog::trace(const LabelPtr& category, const std::string& msg)
+{
+	LOG4CXX_DECODE_CHAR(lsMsg, msg);
+	trace(category, lsMsg);
+}
+#endif
+
+void LogLog::trace(const LabelPtr& category, const LogString& msg)
+{
+	auto p = LogLogPrivate::getInstance();
+	if (p && !p->quietMode) // Not deleted by onexit processing?
+	{
+		if (!p->debugEnabled)
+		{
+			return;
+		}
+
+		std::lock_guard<std::mutex> lock(p->mutex);
+		p->emit_log(p->debugPrefix, category->getName() + LOG4CXX_STR("::") + msg, p->suffix);
+	}
 }
 
 void LogLog::setQuietMode(bool quietMode1)
 {
-	std::unique_lock<std::mutex> lock(getInstance().mutex);
+	auto p = LogLogPrivate::getInstance();
+	std::lock_guard<std::mutex> lock(p->mutex);
 
-	getInstance().quietMode = quietMode1;
+	p->quietMode = quietMode1;
 }
 
 void LogLog::warn(const LogString& msg)
 {
-	std::unique_lock<std::mutex> lock(getInstance().mutex);
-
-	emit(msg);
+	auto p = LogLogPrivate::getInstance();
+	if (p && !p->quietMode) // Not deleted by onexit processing?
+	{
+		std::lock_guard<std::mutex> lock(p->mutex);
+		p->emit_log(p->warnPrefix, msg, p->suffix);
+	}
 }
 
 void LogLog::warn(const LogString& msg, const std::exception& e)
 {
-	std::unique_lock<std::mutex> lock(getInstance().mutex);
-
-	emit(msg);
-	emit(e);
+	auto p = LogLogPrivate::getInstance();
+	if (p && !p->quietMode) // Not deleted by onexit processing?
+	{
+		std::lock_guard<std::mutex> lock(p->mutex);
+		p->emit_log(p->warnPrefix, msg, e, p->suffix);
+	}
 }
 
-void LogLog::emit(const LogString& msg)
+void LogLog::LogLogPrivate::emit_log(const LogString& prefix, const LogString& msg, const LogString& suffix)
 {
-	if (getInstance().quietMode)
-	{
-		return;
-	}
-
-	LogString out(LOG4CXX_STR("log4cxx: "));
-
+	LogString out(elapsedMicroseconds() + LOG4CXX_STR("log4cxx: "));
+	out.append(prefix);
 	out.append(msg);
+	out.append(suffix);
 	out.append(1, (logchar) 0x0A);
 
-	SystemErrWriter::write(out);
+	SystemErrWriter().write(out);
 }
 
-void LogLog::emit(const std::exception& ex)
+void LogLog::LogLogPrivate::emit_log(const LogString& prefix, const LogString& msg, const std::exception& ex, const LogString& suffix)
 {
-	if (getInstance().quietMode)
+	LogString out(elapsedMicroseconds() + LOG4CXX_STR("log4cxx: "));
+	out.append(prefix);
+	LogString exOut;
+	if (auto raw = ex.what())
 	{
-		return;
+		exOut.append(out);
+		Transcoder::decode(raw, exOut);
 	}
-
-	LogString out(LOG4CXX_STR("log4cxx: "));
-	const char* raw = ex.what();
-
-	if (raw != 0)
-	{
-		Transcoder::decode(raw, out);
-	}
-	else
-	{
-		out.append(LOG4CXX_STR("std::exception::what() == null"));
-	}
-
+	out.append(msg);
+	out.append(suffix);
 	out.append(1, (logchar) 0x0A);
 
-	SystemErrWriter::write(out);
+	SystemErrWriter errWriter;
+	errWriter.write(out);
+	if (!exOut.empty())
+	{
+		exOut.append(suffix);
+		exOut.append(1, (logchar) 0x0A);
+		errWriter.write(exOut);
+	}
 }

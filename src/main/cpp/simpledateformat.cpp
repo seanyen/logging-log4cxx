@@ -29,8 +29,8 @@
 #include <log4cxx/private/log4cxx_private.h>
 #include <log4cxx/helpers/pool.h>
 
-using namespace log4cxx;
-using namespace log4cxx::helpers;
+using namespace LOG4CXX_NS;
+using namespace LOG4CXX_NS::helpers;
 
 using namespace std;
 
@@ -53,13 +53,31 @@ using namespace std;
 	#define PUT_FACET(facet, os, time, spec) facet.put(os, os, os.fill(), time, spec)
 #endif
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 namespace helpers
 {
 namespace SimpleDateFormatImpl
 {
 typedef void (*incrementFunction)(tm& time, apr_time_exp_t& apr_time);
+
+/**
+ * Append \c names[index] only when \c index is within bounds.
+ *
+ * The day/month/AM-PM name tables have a fixed size, but the index comes
+ * directly from an apr_time_exp_t field (tm_wday, tm_mon, tm_hour). APR's
+ * time-explosion arithmetic can overflow and yield an out-of-range field for
+ * extreme apr_time_t inputs, in which case the previous code performed an
+ * out-of-bounds std::vector read (std::vector::operator[] is unchecked).
+ */
+static inline void appendName(LogString& s,
+	const std::vector<LogString>& names, int index)
+{
+	if (0 <= index && static_cast<std::vector<LogString>::size_type>(index) < names.size())
+	{
+		s.append(names[index]);
+	}
+}
 
 /**
  * Abstract inner class representing one format token
@@ -92,7 +110,7 @@ class PatternToken
 		 */
 		virtual void format(LogString& s,
 			const apr_time_exp_t& date,
-			log4cxx::helpers::Pool& p) const = 0;
+			LOG4CXX_NS::helpers::Pool& p) const = 0;
 
 	protected:
 
@@ -140,7 +158,7 @@ class PatternToken
 
 					for (; valueIter != values.end(); valueIter++)
 					{
-						PUT_FACET(facet, os, &time, (wchar_t) wspec);
+						PUT_FACET(facet, os, &time, (char)wspec);
 						Transcoder::decode(os.str().substr(start), *valueIter);
 						start = os.str().length();
 						(*inc)(time, aprtime);
@@ -247,7 +265,7 @@ class NumericToken : public PatternToken
 		{
 			size_t initialLength = s.length();
 
-			StringHelper::toString( getField( tm ), p, s );
+			StringHelper::toString( getField( tm ), s );
 			size_t finalLength = s.length();
 
 			if ( initialLength + width > finalLength )
@@ -302,7 +320,7 @@ class AbbreviatedMonthNameToken : public PatternToken
 
 		void format(LogString& s, const apr_time_exp_t& tm, Pool& /* p */ ) const
 		{
-			s.append( names[tm.tm_mon] );
+			appendName( s, names, tm.tm_mon );
 		}
 
 	private:
@@ -321,7 +339,7 @@ class FullMonthNameToken : public PatternToken
 
 		void format( LogString& s, const apr_time_exp_t& tm, Pool& /* p */ ) const
 		{
-			s.append( names[tm.tm_mon] );
+			appendName( s, names, tm.tm_mon );
 		}
 
 	private:
@@ -415,7 +433,7 @@ class AbbreviatedDayNameToken : public PatternToken
 
 		void format( LogString& s, const apr_time_exp_t& tm, Pool& /* p */ ) const
 		{
-			s.append( names[tm.tm_wday] );
+			appendName( s, names, tm.tm_wday );
 		}
 
 	private:
@@ -435,7 +453,7 @@ class FullDayNameToken : public PatternToken
 
 		void format( LogString& s, const apr_time_exp_t& tm, Pool& /* p */ ) const
 		{
-			s.append( names[tm.tm_wday] );
+			appendName( s, names, tm.tm_wday );
 		}
 
 	private:
@@ -551,7 +569,7 @@ class AMPMToken : public PatternToken
 
 		void format( LogString& s, const apr_time_exp_t& tm, Pool& /* p */ ) const
 		{
-			s.append( names[tm.tm_hour / 12] );
+			appendName( s, names, tm.tm_hour / 12 );
 		}
 
 	private:
@@ -599,38 +617,29 @@ class RFC822TimeZoneToken : public PatternToken
 			else
 			{
 				apr_int32_t off = tm.tm_gmtoff;
-				size_t basePos = s.length();
-				s.append( LOG4CXX_STR( "+0000" ) );
+				s.reserve(s.length() + 5);
 
 				if ( off < 0 )
 				{
-					s[basePos] = 0x2D; // '-'
+					s.push_back( '-' );
 					off = -off;
+				}else{
+					s.push_back( '+' );
 				}
 
 				LogString hours;
-				StringHelper::toString( off / 3600, p, hours );
-				size_t hourPos = basePos + 2;
-
-				//
-				//   assumes that point values for 0-9 are same between char and wchar_t
-				//
-				for ( size_t i = hours.length(); i-- > 0; )
-				{
-					s[hourPos--] = hours[i];
+				StringHelper::toString( off / 3600, hours );
+				if( hours.size() == 1 ){
+					s.push_back( '0' );
 				}
+				s.append(hours);
 
 				LogString min;
-				StringHelper::toString( ( off % 3600 ) / 60, p, min );
-				size_t minPos = basePos + 4;
-
-				//
-				//   assumes that point values for 0-9 are same between char and wchar_t
-				//
-				for ( size_t j = min.length(); j-- > 0; )
-				{
-					s[minPos--] = min[j];
+				StringHelper::toString( ( off % 3600 ) / 60, min );
+				if( min.size() == 1 ){
+					s.push_back( '0' );
 				}
+				s.append(min);
 			}
 		}
 };
@@ -643,7 +652,7 @@ class RFC822TimeZoneToken : public PatternToken
 }
 
 
-using namespace log4cxx::helpers::SimpleDateFormatImpl;
+using namespace LOG4CXX_NS::helpers::SimpleDateFormatImpl;
 
 void SimpleDateFormat::addToken(const logchar spec, const int repeat, const std::locale* locale,
 	std::vector < PatternToken* >& pattern )
@@ -796,56 +805,73 @@ void SimpleDateFormat::parsePattern( const LogString& fmt, const std::locale* lo
 }
 
 
-SimpleDateFormat::SimpleDateFormat( const LogString& fmt ) : timeZone( TimeZone::getDefault() )
+struct SimpleDateFormat::SimpleDateFormatPrivate{
+	SimpleDateFormatPrivate() :
+		timeZone(TimeZone::getDefault())
+	{}
+
+	/**
+	 * Time zone.
+	 */
+	TimeZonePtr timeZone;
+
+	/**
+	 * List of tokens.
+	 */
+	PatternTokenList pattern;
+};
+
+SimpleDateFormat::SimpleDateFormat( const LogString& fmt ) : m_priv(std::make_unique<SimpleDateFormatPrivate>())
 {
 #if LOG4CXX_HAS_STD_LOCALE
 	std::locale defaultLocale;
-	parsePattern( fmt, & defaultLocale, pattern );
+	parsePattern( fmt, & defaultLocale, m_priv->pattern );
 #else
-	parsePattern( fmt, NULL, pattern );
+	parsePattern( fmt, NULL, m_priv->pattern );
 #endif
 
-	for ( PatternTokenList::iterator iter = pattern.begin(); iter != pattern.end(); iter++ )
+	for (auto const& item : m_priv->pattern)
 	{
-		( * iter )->setTimeZone( timeZone );
+		item->setTimeZone( m_priv->timeZone );
 	}
 }
 
-SimpleDateFormat::SimpleDateFormat( const LogString& fmt, const std::locale* locale ) : timeZone( TimeZone::getDefault() )
+SimpleDateFormat::SimpleDateFormat( const LogString& fmt, const std::locale* locale ) : m_priv(std::make_unique<SimpleDateFormatPrivate>())
 {
-	parsePattern( fmt, locale, pattern );
+	parsePattern( fmt, locale, m_priv->pattern );
 
-	for ( PatternTokenList::iterator iter = pattern.begin(); iter != pattern.end(); iter++ )
+	for (auto const& item : m_priv->pattern)
 	{
-		( * iter )->setTimeZone( timeZone );
+		item->setTimeZone( m_priv->timeZone );
 	}
 }
 
 
 SimpleDateFormat::~SimpleDateFormat()
 {
-	for ( PatternTokenList::iterator iter = pattern.begin(); iter != pattern.end(); iter++ )
+	for (auto item : m_priv->pattern)
 	{
-		delete * iter;
+		delete item;
 	}
 }
 
 
-void SimpleDateFormat::format( LogString& s, log4cxx_time_t time, Pool& p ) const
+void SimpleDateFormat::format( LogString& toAppendTo, log4cxx_time_t tm ) const
 {
+	helpers::Pool tempPool;
 	apr_time_exp_t exploded;
-	apr_status_t stat = timeZone->explode( & exploded, time );
+	apr_status_t stat = m_priv->timeZone->explode( & exploded, tm );
 
 	if ( stat == APR_SUCCESS )
 	{
-		for ( PatternTokenList::const_iterator iter = pattern.begin(); iter != pattern.end(); iter++ )
+		for ( PatternTokenList::const_iterator iter = m_priv->pattern.begin(); iter != m_priv->pattern.end(); iter++ )
 		{
-			( * iter )->format( s, exploded, p );
+			( * iter )->format( toAppendTo, exploded, tempPool );
 		}
 	}
 }
 
 void SimpleDateFormat::setTimeZone( const TimeZonePtr& zone )
 {
-	timeZone = zone;
+	m_priv->timeZone = zone;
 }

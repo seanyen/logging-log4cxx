@@ -18,15 +18,9 @@
 #ifndef _LOG4CXX_SIMPLE_LAYOUT_H
 #define _LOG4CXX_SIMPLE_LAYOUT_H
 
-#if defined(_MSC_VER)
-	#pragma warning ( push )
-	#pragma warning ( disable: 4231 4251 4275 4786 )
-#endif
-
-
 #include <log4cxx/layout.h>
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 /**
 SimpleLayout consists of the level of the log statement,
@@ -50,37 +44,36 @@ class LOG4CXX_EXPORT SimpleLayout : public Layout
 		END_LOG4CXX_CAST_MAP()
 
 		/**
-		Returns the log statement in a format consisting of the
-		<code>level</code>, followed by " - " and then the
-		<code>message</code>. For example, <pre> INFO - "A message"
+		Append the <code>level</code>, followed by " - "
+		and then the <code>message</code>.
+		For example,
+		<pre> INFO - "A message"
 		</pre>
-
-		@return A byte array in SimpleLayout format.
 		*/
-		virtual void format(LogString& output,
-			const spi::LoggingEventPtr& event,
-			log4cxx::helpers::Pool& pool) const;
+		void format( LogString& output, const spi::LoggingEventPtr& event ) const override;
 
 		/**
 		The SimpleLayout does not handle the throwable contained within
 		{@link spi::LoggingEvent LoggingEvents}. Thus, it returns
 		<code>true</code>.
 		*/
-		bool ignoresThrowable() const
+		bool ignoresThrowable() const override
 		{
 			return true;
 		}
 
-		virtual void activateOptions(log4cxx::helpers::Pool& /* p */) {}
-		virtual void setOption(const LogString& /* option */,
-			const LogString& /* value */) {}
+
+		/**
+		\copybrief spi::OptionHandler::setOption()
+
+		Supported options | Supported values | Default value
+		-------------- | ---------------- | ---------------
+		- | - | -
+		*/
+		void setOption(const LogString& /* option */,
+			const LogString& /* value */) override {}
 };
 LOG4CXX_PTR_DEF(SimpleLayout);
 }  // namespace log4cxx
-
-
-#if defined(_MSC_VER)
-	#pragma warning ( pop )
-#endif
 
 #endif //_LOG4CXX_SIMPLE_LAYOUT_H

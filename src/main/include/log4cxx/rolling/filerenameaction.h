@@ -21,7 +21,7 @@
 #include <log4cxx/rolling/action.h>
 #include <log4cxx/file.h>
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 namespace rolling
 {
@@ -29,9 +29,7 @@ namespace rolling
 
 class FileRenameAction : public Action
 {
-		const File source;
-		const File destination;
-		bool renameEmptyFile;
+		struct FileRenameActionPrivate;
 	public:
 		DECLARE_ABSTRACT_LOG4CXX_OBJECT(FileRenameAction)
 		BEGIN_LOG4CXX_CAST_MAP()
@@ -46,12 +44,11 @@ class FileRenameAction : public Action
 			const File& renameTo,
 			bool renameEmptyFile);
 
+		using Action::execute;
 		/**
-		 * Perform action.
-		 *
-		 * @return true if successful.
+		 * Perform rename.
 		 */
-		virtual bool execute(log4cxx::helpers::Pool& pool) const;
+		bool execute(  ) const override;
 };
 
 LOG4CXX_PTR_DEF(FileRenameAction);

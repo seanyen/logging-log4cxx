@@ -1,0 +1,98 @@
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+name: log4cxx-windows-static
+
+on: [push, pull_request]
+
+jobs:
+  job:
+    name: static-${{ matrix.name }}-build-and-test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        name: [windows-2022, windows-2025-fmt]
+        include:
+          - name: windows-2022
+            os: windows-2022
+            vcpkg_ref: 2025.07.25
+          - name: windows-2025-fmt
+            os: windows-2025
+            vcpkg_options: fmt
+            vcpkg_ref: 2026.05.25
+
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        persist-credentials: false # do not persist auth token in the local git config
+        path: main
+
+    - name: 'Restore Prebuilt Dependencies'
+      id: restore-vcpkg-cache
+      uses: actions/cache@v5
+      with:
+        path: vcpkg
+        key: ${{ matrix.name }}-${{ matrix.vcpkg_ref }}-x64-static
+
+    - name: 'Checkout VCPKG'
+      if: steps.restore-vcpkg-cache.outputs.cache-hit != 'true'
+      uses: actions/checkout@v6
+      with:
+        repository: microsoft/vcpkg
+        path: vcpkg
+        ref: ${{ matrix.vcpkg_ref }}
+
+    - name: 'Configure Dependencies'
+      if: steps.restore-vcpkg-cache.outputs.cache-hit != 'true'
+      id: runvcpkg
+      shell: pwsh
+      run: |
+        cd vcpkg
+        ./bootstrap-vcpkg.bat
+        ./vcpkg install apr apr-util ${{ matrix.vcpkg_options }} --triplet=x64-windows-static
+
+    - name: 'Install zip'
+      id: install-zip
+      shell: pwsh
+      run: |
+        $Env:PATH += ";C:\msys64\usr\bin"
+        pacman --noconfirm -S zip
+
+    - name: 'run cmake - static'
+      shell: pwsh
+      run: |
+        $ROOT=Get-Location
+        cmake `
+            -DLOG4CXX_TEST_ONLY_BUILD=1 `
+            -DVCPKG_TARGET_TRIPLET=x64-windows-static `
+            -DBUILD_SHARED_LIBS=off `
+            -DLOG4CXX_MULTIPROCESS_ROLLING_FILE_APPENDER=on `
+            -DLOG4CXX_TEST_PROGRAM_PATH=C:\msys64\usr\bin `
+            "-DCMAKE_TOOLCHAIN_FILE=$ROOT/vcpkg/scripts/buildsystems/vcpkg.cmake" `
+            "-DVCPKG_TARGET_TRIPLET=x64-windows-static" `
+            "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDebug" `
+           -S "$ROOT/main" `
+           -B "$ROOT/build"
+
+        cmake --build "$ROOT/build" --config Debug
+
+    - name: run unit tests
+      shell: pwsh
+      timeout-minutes: 10
+      run: |
+        $ROOT=Get-Location
+        ctest --test-dir "$ROOT/build" -C Debug --output-on-failure
+
+

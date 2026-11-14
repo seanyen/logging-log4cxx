@@ -21,8 +21,10 @@
 #include <log4cxx/logstring.h>
 #include <log4cxx/helpers/object.h>
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
+namespace helpers { class Pool; }
+
 namespace spi
 {
 class OptionHandler;
@@ -43,29 +45,35 @@ class LOG4CXX_EXPORT OptionHandler : public virtual helpers::Object
 
 		<p>This allows to defer activiation of the options until all
 		options have been set. This is required for components which have
-		related options that remain ambigous until all are set.
+		related options that remain ambiguous until all are set.
 
-		<p>For example, the FileAppender has the {@link
-		FileAppender#setFile File} and {@link
-		FileAppender#setAppend Append} options both of
-		which are ambigous until the other is also set.  */
-		virtual void activateOptions(log4cxx::helpers::Pool& p) = 0;
-
+		<p>For example, the FileAppender has
+		the <code>File</code> and <b>Append</b> options both of
+		which are ambiguous until the other is also set.
+		*/
+		virtual void activateOptions() = 0;
+		/**
+		@deprecated This function is deprecated and will be removed in a future version.
+		*/
+		[[deprecated("Use activateOptions() without parameters instead")]]
+		void activateOptions(helpers::Pool&);
 
 		/**
-		Set <code>option</code> to <code>value</code>.
+		Override this method to set <code>option</code> to <code>value</code>.
+
+		This implementation writes a warning that \c option is unrecognised.
 
 		<p>The handling of each option depends on the OptionHandler
 		instance. Some options may become active immediately whereas
 		other may be activated only when #activateOptions is
 		called.
 		*/
-		virtual void setOption(const LogString& option,
-			const LogString& value) = 0;
+		virtual void setOption(const LogString& option, const LogString& value);
 
 }; // class OptionConverter
 }  // namespace spi
 } // namespace log4cxx
+
 
 
 #endif //_LOG4CXX_SPI_OPTION_HANDLER_H

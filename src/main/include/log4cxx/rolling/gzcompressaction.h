@@ -18,15 +18,10 @@
 #if !defined(_LOG4CXX_ROLLING_GZ_COMPRESS_ACTION_H)
 #define _LOG4CXX_ROLLING_GZ_COMPRESS_ACTION_H
 
-#if defined(_MSC_VER)
-	#pragma warning ( push )
-	#pragma warning ( disable: 4231 4251 4275 4786 )
-#endif
-
 #include <log4cxx/rolling/action.h>
 #include <log4cxx/file.h>
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 namespace rolling
 {
@@ -34,9 +29,7 @@ namespace rolling
 
 class GZCompressAction : public Action
 {
-		const File source;
-		const File destination;
-		bool deleteSource;
+		struct GZCompressActionPrivate;
 	public:
 		DECLARE_ABSTRACT_LOG4CXX_OBJECT(GZCompressAction)
 		BEGIN_LOG4CXX_CAST_MAP()
@@ -50,13 +43,24 @@ class GZCompressAction : public Action
 		GZCompressAction(const File& source,
 			const File& destination,
 			bool deleteSource);
+		~GZCompressAction();
+
+		using Action::execute;
+		/**
+		 * Compress the file.
+		 */
+		bool execute(  ) const override;
 
 		/**
-		 * Perform action.
+		 * Set to true to throw an IOException on a fork failure.  By default, this
+		 * is true.  When an IOException is thrown, this will automatically cause the
+		 * error handler to be called(which is the recommended way of handling this
+		 * problem).  By setting this to false, the GZCompressAction effectively
+		 * turns into a FileRenameAction if any errors are encountered.
 		 *
-		 * @return true if successful.
+		 * @param throwIO
 		 */
-		virtual bool execute(log4cxx::helpers::Pool& pool) const;
+		void setThrowIOExceptionOnForkFailure(bool throwIO);
 
 	private:
 		GZCompressAction(const GZCompressAction&);
@@ -67,10 +71,6 @@ LOG4CXX_PTR_DEF(GZCompressAction);
 
 }
 }
-
-#if defined(_MSC_VER)
-	#pragma warning ( pop )
-#endif
 
 #endif
 

@@ -18,17 +18,11 @@
 #ifndef _LOG4CXX_HELPERS_XML_H
 #define _LOG4CXX_HELPERS_XML_H
 
-#if defined(_MSC_VER)
-	#pragma warning ( push )
-	#pragma warning ( disable: 4231 4251 4275 4786 )
-#endif
-
-
 #include <log4cxx/logstring.h>
 #include <log4cxx/helpers/object.h>
 #include <log4cxx/helpers/exception.h>
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 class File;
 namespace helpers
@@ -53,7 +47,8 @@ class LOG4CXX_EXPORT DOMException : public RuntimeException
 The XMLDOMNode interface is the primary datatype for the entire Document
 Object Model.
 */
-class LOG4CXX_EXPORT XMLDOMNode : virtual public Object
+class LOG4CXX_EXPORT XMLDOMNode
+	: public Object
 {
 	public:
 		DECLARE_ABSTRACT_LOG4CXX_OBJECT(XMLDOMNode)
@@ -74,7 +69,8 @@ LOG4CXX_PTR_DEF(XMLDOMNode);
 /**
 The XMLDOMElement interface represents an element in an XML document
 */
-class LOG4CXX_EXPORT XMLDOMElement : virtual public XMLDOMNode
+class LOG4CXX_EXPORT XMLDOMElement
+	: public XMLDOMNode
 {
 	public:
 		DECLARE_ABSTRACT_LOG4CXX_OBJECT(XMLDOMElement)
@@ -89,7 +85,8 @@ The XMLDOMDocument interface represents an entire XML document.
 Conceptually, it is the root of the document tree, and provides the
 primary access to the document's data.
 */
-class LOG4CXX_EXPORT XMLDOMDocument : virtual public XMLDOMNode
+class LOG4CXX_EXPORT XMLDOMDocument
+	: public XMLDOMNode
 {
 	public:
 		DECLARE_ABSTRACT_LOG4CXX_OBJECT(XMLDOMDocument)
@@ -110,7 +107,8 @@ XMLDOMNodeList objects in the DOM are live.
 The items in the XMLDOMNodeList are accessible via an integral index,
 starting from 0.
 */
-class LOG4CXX_EXPORT XMLDOMNodeList : virtual public Object
+class LOG4CXX_EXPORT XMLDOMNodeList
+	: public Object
 {
 	public:
 		DECLARE_ABSTRACT_LOG4CXX_OBJECT(XMLDOMNodeList)
@@ -120,11 +118,6 @@ class LOG4CXX_EXPORT XMLDOMNodeList : virtual public Object
 LOG4CXX_PTR_DEF(XMLDOMNodeList);
 }  // namespace helpers
 } // namespace log4cxx
-
-
-#if defined(_MSC_VER)
-	#pragma warning ( pop )
-#endif
 
 #endif // _LOG4CXX_HELPERS_XML_H
 

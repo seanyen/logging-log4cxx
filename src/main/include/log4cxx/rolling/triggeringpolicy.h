@@ -25,7 +25,7 @@
 #include <log4cxx/spi/loggingevent.h>
 #include <log4cxx/appender.h>
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 class File;
 
@@ -41,9 +41,8 @@ namespace rolling
  *
  * */
 
-class LOG4CXX_EXPORT TriggeringPolicy :
-	public virtual spi::OptionHandler,
-	public virtual helpers::Object
+class LOG4CXX_EXPORT TriggeringPolicy
+	: public spi::OptionHandler
 {
 		DECLARE_ABSTRACT_LOG4CXX_OBJECT(TriggeringPolicy)
 		BEGIN_LOG4CXX_CAST_MAP()
@@ -66,7 +65,7 @@ class LOG4CXX_EXPORT TriggeringPolicy :
 		 */
 		virtual bool isTriggeringEvent(
 			Appender* appender,
-			const log4cxx::spi::LoggingEventPtr& event,
+			const spi::LoggingEventPtr& event,
 			const LogString& filename,
 			size_t fileLength) = 0;
 

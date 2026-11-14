@@ -18,10 +18,11 @@
 #include <log4cxx/logstring.h>
 #include <log4cxx/helpers/dateformat.h>
 #include <log4cxx/helpers/stringhelper.h>
+#include <log4cxx/helpers/pool.h>
 
 
-using namespace log4cxx;
-using namespace log4cxx::helpers;
+using namespace LOG4CXX_NS;
+using namespace LOG4CXX_NS::helpers;
 
 IMPLEMENT_LOG4CXX_OBJECT(DateFormat)
 
@@ -31,8 +32,17 @@ void DateFormat::setTimeZone(const TimeZonePtr&) {}
 
 void DateFormat::numberFormat(LogString& s, int n, Pool& p) const
 {
-	StringHelper::toString(n, p, s);
+	StringHelper::toString(n, s);
 }
 
 DateFormat::DateFormat() {}
 
+void DateFormat::numberFormat(LogString& toAppendTo, int n) const
+{
+	StringHelper::toString(n, toAppendTo);
+}
+
+void DateFormat::format(LogString& toAppendTo, log4cxx_time_t tm, Pool& p) const
+{
+	format(toAppendTo, tm);
+}

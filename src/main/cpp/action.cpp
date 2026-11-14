@@ -16,45 +16,45 @@
  */
 #include <log4cxx/logstring.h>
 #include <log4cxx/rolling/action.h>
+#include <log4cxx/private/action_priv.h>
+#include <log4cxx/helpers/loglog.h>
 #include <mutex>
 
-using namespace log4cxx;
-using namespace log4cxx::rolling;
-using namespace log4cxx::helpers;
+using namespace LOG4CXX_NS;
+using namespace LOG4CXX_NS::rolling;
+using namespace LOG4CXX_NS::helpers;
 
 IMPLEMENT_LOG4CXX_OBJECT(Action)
 
 Action::Action() :
-	complete(false),
-	interrupted(false),
-	pool()
+	m_priv( std::make_unique<Action::ActionPrivate>() )
 {
 }
+
+Action::Action( std::unique_ptr<ActionPrivate> priv ) :
+	m_priv( std::move(priv) ) {}
 
 Action::~Action()
 {
 }
 
-/**
- * {@inheritDoc}
- */
-void Action::run(log4cxx::helpers::Pool& pool1)
+void Action::run()
 {
-	std::unique_lock<std::mutex> lock(mutex);
+	std::lock_guard<std::mutex> lock(m_priv->mutex);
 
-	if (!interrupted)
+	if (!m_priv->closed)
 	{
 		try
 		{
-			execute(pool1);
+			execute();
 		}
-		catch (std::exception& ex)
+		catch (const std::exception& ex)
 		{
-			reportException(ex);
+			helpers::LogLog::error(getName() + LOG4CXX_STR(" raised the following exception"), ex);
 		}
 
-		complete = true;
-		interrupted = true;
+		m_priv->complete = true;
+		m_priv->closed = true;
 	}
 }
 
@@ -63,8 +63,8 @@ void Action::run(log4cxx::helpers::Pool& pool1)
  */
 void Action::close()
 {
-	std::unique_lock<std::mutex> lock(mutex);
-	interrupted = true;
+	std::lock_guard<std::mutex> lock(m_priv->mutex);
+	m_priv->closed = true;
 }
 
 /**
@@ -73,14 +73,16 @@ void Action::close()
  */
 bool Action::isComplete() const
 {
-	return complete;
+	return m_priv->complete;
 }
 
-/**
- * Capture exception.
- *
- * @param ex exception.
- */
-void Action::reportException(const std::exception& /* ex */)
+LogString Action::getName() const
 {
+	return m_priv->actionName;
 }
+
+bool Action::execute(helpers::Pool&) const
+{
+	return execute();
+}
+

@@ -1,0 +1,88 @@
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+name: Generate release files
+
+on:
+  workflow_dispatch:
+
+permissions: read-all
+
+jobs:
+  job1:
+    name: 'Package the code, then test an achive'
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        persist-credentials: false # do not persist auth token in the local git config
+        path: clean-checkout
+
+    - name: Import GPG Key
+      run: |
+        echo "${{ secrets.LOGGING_GPG_SECRET_KEY }}" | gpg --batch --import
+
+    - name: 'Create release files'
+      run: |
+        cd clean-checkout
+        rm -r src/main/abi-symbols
+        VERSION=`grep 'set(log4cxx_VER ' src/cmake/projectVersionDetails.cmake|sed -Ee 's/.*log4cxx_VER ([0-9]*)\.([0-9]*)\.([0-9]*).*/\1.\2.\3/'`
+        tar -zcf "../apache-log4cxx-$VERSION.tar.gz" "--transform=s,^,apache-log4cxx-$VERSION/," LICENSE  NOTICE  README.md  CMakeLists.txt  Config.cmake.in  src  liblog4cxx.pc.in  liblog4cxx-qt.pc.in
+        cd ..
+        sha512sum "apache-log4cxx-$VERSION.tar.gz" > "apache-log4cxx-$VERSION.tar.gz.sha512"
+        sha256sum "apache-log4cxx-$VERSION.tar.gz" > "apache-log4cxx-$VERSION.tar.gz.sha256"
+        gpg --armor --detach-sign --yes --pinentry-mode error "apache-log4cxx-$VERSION.tar.gz"
+        tar xf "apache-log4cxx-$VERSION.tar.gz"
+        zip -rm "apache-log4cxx-$VERSION.zip" apache-log4cxx-$VERSION
+        sha512sum "apache-log4cxx-$VERSION.zip" > "apache-log4cxx-$VERSION.zip.sha512"
+        sha256sum "apache-log4cxx-$VERSION.zip" > "apache-log4cxx-$VERSION.zip.sha256"
+        gpg --armor --detach-sign --yes --pinentry-mode error "apache-log4cxx-$VERSION.zip"
+
+    - name: 'Clean up GPG keyring'
+      if: always()
+      run: |
+        # Extract secret key fingerprints dynamically from the keyring
+        FINGERPRINTS=$(gpg --list-secret-keys --with-colons | awk -F: '$1=="fpr" {print $10}')
+        if [ -z "$FINGERPRINTS" ]; then
+          echo "No secret keys found in keyring to delete."
+        else
+          for fpr in $FINGERPRINTS; do
+            echo "Deleting secret key: $fpr"
+            gpg --batch --yes --delete-secret-keys "$fpr" || true
+            gpg --batch --yes --delete-keys "$fpr" || true
+          done
+        fi
+
+    - uses: actions/upload-artifact@v7
+      with:
+        name: 'release_files'
+        path: |
+          apache-log4cxx-*
+
+    - name: 'Configure Dependencies'
+      run: |
+        sudo apt-get install -y libapr1-dev libaprutil1-dev
+
+    - name: 'Test the archive'
+      timeout-minutes: 10
+      run: |
+        VERSION=`ls apache-log4cxx-*.tar.gz | sed -Ee 's/.*apache-log4cxx-([0-9]*)\.([0-9]*)\.([0-9]*).*/\1.\2.\3/'`
+        echo "Extracting files from apache-log4cxx-$VERSION.tar.gz..."
+        tar xf apache-log4cxx-$VERSION.tar.gz "--transform=s,apache-log4cxx-$VERSION,test-files," || exit
+
+        cmake -S test-files -B test-build || exit
+        cmake --build test-build || exit
+        cd test-build
+        ctest

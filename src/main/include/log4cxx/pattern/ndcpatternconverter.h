@@ -20,7 +20,7 @@
 
 #include <log4cxx/pattern/loggingeventpatternconverter.h>
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 namespace pattern
 {
@@ -34,18 +34,14 @@ namespace pattern
  */
 class LOG4CXX_EXPORT NDCPatternConverter : public LoggingEventPatternConverter
 {
-
-		/**
-		 * Private constructor.
-		 */
-		NDCPatternConverter();
-
 	public:
 		DECLARE_LOG4CXX_PATTERN(NDCPatternConverter)
 		BEGIN_LOG4CXX_CAST_MAP()
 		LOG4CXX_CAST_ENTRY(NDCPatternConverter)
 		LOG4CXX_CAST_ENTRY_CHAIN(LoggingEventPatternConverter)
 		END_LOG4CXX_CAST_MAP()
+
+		NDCPatternConverter();
 
 		/**
 		 * Obtains an instance of NDCPatternConverter.
@@ -57,9 +53,7 @@ class LOG4CXX_EXPORT NDCPatternConverter : public LoggingEventPatternConverter
 
 		using LoggingEventPatternConverter::format;
 
-		void format(const log4cxx::spi::LoggingEventPtr& event,
-			LogString& toAppendTo,
-			log4cxx::helpers::Pool& p) const;
+		void format( const spi::LoggingEventPtr& event, LogString& toAppendTo ) const override;
 };
 }
 }

@@ -20,7 +20,7 @@
 
 #include <log4cxx/logger.h>
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 namespace spi
 {
@@ -40,7 +40,8 @@ class LOG4CXX_EXPORT RootLogger : public Logger
 		The root logger names itself as "root". However, the root
 		logger cannot be retrieved by name.
 		*/
-		RootLogger(log4cxx::helpers::Pool& pool, const LevelPtr level);
+		RootLogger(const LevelPtr& level);
+
 
 		~RootLogger() {}
 
@@ -48,13 +49,13 @@ class LOG4CXX_EXPORT RootLogger : public Logger
 		Return the assigned level value without walking the logger
 		hierarchy.
 		*/
-		virtual const LevelPtr getEffectiveLevel() const;
+		LevelPtr getEffectiveLevel() const override;
 
 		/**
-		            Setting a null value to the level of the root logger may have catastrophic
-		            results. We prevent this here.
-		            */
-		void setLevel(const LevelPtr level);
+		Setting a null value to the level of the root logger may have catastrophic
+		results. We prevent this here.
+		*/
+		void setLevel(const LevelPtr& level) override;
 };
 }  // namespace spi
 } // namespace log4cxx

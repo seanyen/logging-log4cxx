@@ -19,7 +19,10 @@
 #include <log4cxx/mdc.h>
 #include <log4cxx/file.h>
 #include <log4cxx/logger.h>
-#include <log4cxx/propertyconfigurator.h>
+#include <log4cxx/spi/loggerrepository.h>
+#include <log4cxx/pattern/formattinginfo.h>
+#include <log4cxx/pattern/mdcpatternconverter.h>
+#include <log4cxx/patternlayout.h>
 #include "insertwide.h"
 #include "logunit.h"
 #include "util/compare.h"
@@ -32,6 +35,9 @@ LOGUNIT_CLASS(MDCTestCase)
 {
 	LOGUNIT_TEST_SUITE(MDCTestCase);
 	LOGUNIT_TEST(test1);
+	LOGUNIT_TEST(test2);
+	LOGUNIT_TEST(test3);
+	LOGUNIT_TEST(test4);
 	LOGUNIT_TEST_SUITE_END();
 
 public:
@@ -42,8 +48,10 @@ public:
 
 	void tearDown()
 	{
-		log4cxx::spi::LoggerRepositoryPtr rep = Logger::getRootLogger()->getLoggerRepository().lock();
-		if (rep) {
+		auto rep = Logger::getRootLogger()->getLoggerRepository();
+
+		if (rep)
+		{
 			rep->resetConfiguration();
 		}
 	}
@@ -55,10 +63,45 @@ public:
 	{
 		std::string key("key1");
 		std::string expected("value2");
-		MDC::put(key, "value1");
+		MDC item1(key, "value1");
 		MDC::put(key, expected);
 		std::string actual(MDC::get(key));
 		LOGUNIT_ASSERT_EQUAL(expected, actual);
+	}
+
+	/// Check MDC formatting skips entries that exceed the maximum field length.
+	void test2()
+	{
+		MDC item1("key1", "value1");
+		MDC item2("key2", "value2");
+		LogString output;
+		PatternLayout l{ LOG4CXX_STR("%-5p %c - %.30J %m") };
+		l.format(output, std::make_shared<spi::LoggingEvent>(LOG4CXX_STR("MDC.LayoutTest"), Level::getInfo(), LOG4CXX_STR("Message"), spi::LocationInfo::getLocationUnavailable()));
+		LOGUNIT_ASSERT_EQUAL(LOG4CXX_STR("INFO  MDC.LayoutTest - {\"key1\":\"value1\"} Message"), output);
+	}
+
+	/// A maximum field length of zero must suppress all MDC content.
+	void test3()
+	{
+		pattern::MDCPatternConverter converter;
+		bool leftAlign{false};
+		const int minLength{0}, maxLength{0};
+		converter.setFormattingInfo(std::make_shared<pattern::FormattingInfo>(leftAlign, minLength, maxLength));
+		MDC item1("key1", "value1");
+		auto e = std::make_shared<spi::LoggingEvent>(LOG4CXX_STR("MDC.LayoutTest"), Level::getInfo(), LOG4CXX_STR("Message"), spi::LocationInfo::getLocationUnavailable());
+		LogString output;
+		converter.format(e, output);
+		LOGUNIT_ASSERT_EQUAL(LOG4CXX_STR(""), output);
+	}
+
+	/// A quote character in MDC content must be doubled in a quoted context.
+	void test4()
+	{
+		MDC item1("key1", "it's");
+		LogString output;
+		PatternLayout l{ LOG4CXX_STR("%J{'}") };
+		l.format(output, std::make_shared<spi::LoggingEvent>(LOG4CXX_STR("MDC.LayoutTest"), Level::getInfo(), LOG4CXX_STR("Message"), spi::LocationInfo::getLocationUnavailable()));
+		LOGUNIT_ASSERT_EQUAL(LOG4CXX_STR("{\"key1\":\"it''s\"}"), output);
 	}
 };
 

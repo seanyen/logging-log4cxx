@@ -1,0 +1,134 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#ifndef _LOG4CXX_FILEAPPENDER_PRIV_H
+#define _LOG4CXX_FILEAPPENDER_PRIV_H
+
+#include <log4cxx/private/writerappender_priv.h>
+#include <log4cxx/fileappender.h>
+#include <log4cxx/helpers/threadutility.h>
+#include <memory>
+#include <mutex>
+
+namespace LOG4CXX_NS
+{
+
+struct FileAppender::FileAppenderPriv : public WriterAppender::WriterAppenderPriv
+{
+	FileAppenderPriv
+		( const LayoutPtr& _layout = {}
+		, const LogString& _fileName = {}
+		, bool _fileAppend = true
+		, bool _bufferedIO = false
+		, int _bufferSize = 8 * 1024
+		)
+		: WriterAppenderPriv(_layout)
+		, fileAppend(_fileAppend)
+		, targetFile(_fileName)
+		, bufferedIO(_bufferedIO)
+		, bufferSize(_bufferSize)
+		{}
+
+	/** Append to or truncate the file? The default value for this
+	variable is <code>true</code>, meaning that by default a
+	<code>FileAppender</code> will append to an existing file and
+	not truncate it.
+	<p>This option is meaningful only if the FileAppender opens the
+	file.
+	*/
+	bool fileAppend;
+
+	/**
+	The targeted file name. */
+	File targetFile;
+
+	/**
+	Do we do bufferedIO? */
+	bool bufferedIO;
+
+	/**
+	How big should the IO buffer be? Default is 8K. */
+	size_t bufferSize;
+
+	/**
+	The number of seconds between each asynchronous output buffer flush.
+	Only used when <code>bufferedIO == true</code>.
+	*/
+	int bufferedSeconds{ 5 };
+
+	/**
+	Create the file when the first message is written? */
+	bool lazyFileCreation{ false };
+
+	/**
+	Control block shared with the periodic output buffer flush task.
+	The flush task only reaches this appender through the control block,
+	and the pointer in it is cleared (under the control block mutex)
+	before this structure is destroyed, so a flush that is already
+	executing when the appender is destroyed can never touch freed
+	memory and a flush scheduled afterwards is a no-op.
+	Only used when <code>bufferedIO == true</code>.
+	*/
+	struct FlushTask
+	{
+		std::mutex mtx;
+		WriterAppenderPriv* priv{ nullptr };
+
+		void run()
+		{
+			std::lock_guard<std::mutex> lock(mtx);
+			if (priv)
+				priv->flush();
+		}
+
+		/** Detach from the appender, blocking until any in-flight flush completes. */
+		void detach()
+		{
+			std::lock_guard<std::mutex> lock(mtx);
+			priv = nullptr;
+		}
+	};
+	std::shared_ptr<FlushTask> flushTask;
+
+	/**
+	The (unique) name the periodic flush task was registered under.
+	Captured at registration time so the task is deregistered correctly
+	even if the appender is renamed after activateOptions() or shares
+	its name with another appender.
+	*/
+	LogString flushTaskName;
+
+	/**
+	Manages asynchronous output buffer flush.
+	Only used when <code>bufferedIO == true</code>.
+	*/
+	helpers::ThreadUtility::ManagerWeakPtr taskManager;
+
+	/**
+	Call open() and, if successful, set up any required monitoring
+	*/
+	void activate();
+
+	/**
+	Close any existing writer and establish a new writer
+	*/
+	void open();
+};
+
+}
+
+#endif

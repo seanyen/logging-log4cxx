@@ -14,18 +14,16 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#if defined(_MSC_VER)
-	#pragma warning ( disable: 4231 4251 4275 4786 )
-#endif
 
 #include <log4cxx/logstring.h>
 #include <log4cxx/pattern/loggingeventpatternconverter.h>
 #include <log4cxx/spi/loggingevent.h>
+#include <log4cxx/private/patternconverter_priv.h>
 
-using namespace log4cxx;
-using namespace log4cxx::pattern;
-using namespace log4cxx::spi;
-using namespace log4cxx::helpers;
+using namespace LOG4CXX_NS;
+using namespace LOG4CXX_NS::pattern;
+using namespace LOG4CXX_NS::spi;
+using namespace LOG4CXX_NS::helpers;
 
 IMPLEMENT_LOG4CXX_OBJECT(LoggingEventPatternConverter)
 
@@ -36,19 +34,26 @@ LoggingEventPatternConverter::LoggingEventPatternConverter(
 {
 }
 
-void LoggingEventPatternConverter::format(const ObjectPtr& obj,
-	LogString& output,
-	log4cxx::helpers::Pool& p) const
+LoggingEventPatternConverter::LoggingEventPatternConverter(std::unique_ptr<PatternConverterPrivate> priv) :
+	PatternConverter (std::move(priv))
 {
-	LoggingEventPtr le = log4cxx::cast<LoggingEvent>(obj);
 
-	if (le != NULL)
+}
+
+void LoggingEventPatternConverter::format( const helpers::ObjectPtr& obj, LogString& toAppendTo ) const
+{
+	if (auto event = LOG4CXX_NS::cast<LoggingEvent>(obj))
 	{
-		format(le, output, p);
+		format( event, toAppendTo );
 	}
 }
 
 bool LoggingEventPatternConverter::handlesThrowable() const
 {
 	return false;
+}
+
+void LoggingEventPatternConverter::format(const spi::LoggingEventPtr& event, LogString& toAppendTo, helpers::Pool&) const
+{
+	format(event, toAppendTo);
 }

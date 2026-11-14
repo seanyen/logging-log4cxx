@@ -15,25 +15,58 @@
  * limitations under the License.
  */
 
+#define NOMINMAX
 #include "logunit.h"
 
-#include <log4cxx/logger.h>
+#include <log4cxx/loggerinstance.h>
 #include <log4cxx/logmanager.h>
 #include <log4cxx/simplelayout.h>
 #include "vectorappender.h"
 #include <log4cxx/asyncappender.h>
 #include "appenderskeletontestcase.h"
+#include <log4cxx/helpers/loglog.h>
 #include <log4cxx/helpers/pool.h>
+#include <log4cxx/helpers/transcoder.h>
+#include <log4cxx/varia/fallbackerrorhandler.h>
 #include <apr_strings.h>
 #include "testchar.h"
 #include <log4cxx/helpers/stringhelper.h>
 #include <log4cxx/spi/location/locationinfo.h>
 #include <log4cxx/xml/domconfigurator.h>
+#include <log4cxx/propertyconfigurator.h>
+#include <log4cxx/fileappender.h>
 #include <log4cxx/file.h>
+#include <ostream>
+#include <thread>
+#include <atomic>
+#include <mutex>
+#include <fstream>
 
-using namespace log4cxx;
-using namespace log4cxx::helpers;
-using namespace log4cxx::spi;
+#if LOG4CXX_ASYNC_BUFFER_SUPPORTS_FMT
+#include <fmt/core.h>
+#include <fmt/ostream.h>
+#if LOG4CXX_WCHAR_T_API || LOG4CXX_LOGCHAR_IS_WCHAR
+#include <fmt/xchar.h>
+#endif
+struct MyStruct
+{
+	int value;
+};
+using OutputStreamType = std::basic_ostream<LOG4CXX_NS::logchar>;
+OutputStreamType& operator<<(OutputStreamType& stream, const MyStruct& data)
+{
+	stream << LOG4CXX_STR("[MyStruct value: ") << data.value << LOG4CXX_STR("]");
+	return stream;
+}
+
+#if FMT_VERSION >= (9 * 10000)
+template <> struct fmt::formatter<MyStruct, LOG4CXX_NS::logchar> : fmt::basic_ostream_formatter<LOG4CXX_NS::logchar> {};
+#endif
+#endif
+
+using namespace LOG4CXX_NS;
+using namespace LOG4CXX_NS::helpers;
+using namespace LOG4CXX_NS::spi;
 
 class NullPointerAppender : public AppenderSkeleton
 {
@@ -46,18 +79,9 @@ class NullPointerAppender : public AppenderSkeleton
 		/**
 		 * @{inheritDoc}
 		 */
-		void append(const spi::LoggingEventPtr&, log4cxx::helpers::Pool&)
+		void append( const spi::LoggingEventPtr& event ) override
 		{
-			throw NullPointerException(LOG4CXX_STR("Intentional NullPointerException"));
-		}
-
-		void close()
-		{
-		}
-
-		bool requiresLayout() const
-		{
-			return false;
+			throw RuntimeException(LOG4CXX_STR("Intentional Exception"));
 		}
 };
 
@@ -79,22 +103,10 @@ class BlockableVectorAppender : public VectorAppender
 		/**
 		 * {@inheritDoc}
 		 */
-		void append(const spi::LoggingEventPtr& event, log4cxx::helpers::Pool& p)
+		void append( const spi::LoggingEventPtr& event ) override
 		{
-			std::unique_lock<std::mutex> lock( blocker );
-			VectorAppender::append(event, p);
-
-			//
-			//   if fatal, echo messages for testLoggingInDispatcher
-			//
-			if (event->getLevel() == Level::getInfo())
-			{
-				LoggerPtr logger = Logger::getLoggerLS(event->getLoggerName());
-				LOG4CXX_LOGLS(logger, Level::getError(), event->getMessage());
-				LOG4CXX_LOGLS(logger, Level::getWarn(), event->getMessage());
-				LOG4CXX_LOGLS(logger, Level::getInfo(), event->getMessage());
-				LOG4CXX_LOGLS(logger, Level::getDebug(), event->getMessage());
-			}
+			std::lock_guard<std::mutex> lock( blocker );
+			VectorAppender::append( event );
 		}
 
 		std::mutex& getBlocker()
@@ -103,10 +115,59 @@ class BlockableVectorAppender : public VectorAppender
 		}
 
 };
-
 LOG4CXX_PTR_DEF(BlockableVectorAppender);
 
-#if APR_HAS_THREADS
+/**
+ * Vector appender that throws on the first \c failureCount calls to append.
+ */
+class TransientlyFailingVectorAppender : public VectorAppender
+{
+	private:
+		std::atomic<int> failuresRemaining;
+	public:
+		TransientlyFailingVectorAppender(int failureCount)
+			: failuresRemaining(failureCount)
+		{
+		}
+
+		void append( const spi::LoggingEventPtr& event ) override
+		{
+			if (0 < failuresRemaining--)
+			{
+				throw RuntimeException(LOG4CXX_STR("Intentional transient exception"));
+			}
+			VectorAppender::append( event );
+		}
+
+		/** Goes negative once an append call has succeeded. */
+		int remainingFailures() const
+		{
+			return failuresRemaining;
+		}
+};
+LOG4CXX_PTR_DEF(TransientlyFailingVectorAppender);
+
+/**
+ * An appender that adds logging events
+ */
+class LoggingVectorAppender : public VectorAppender
+{
+	LoggerInstancePtr logger{ "LoggingVectorAppender" };
+	void append( const spi::LoggingEventPtr& event ) override
+	{
+		auto& lsMsg = event->getRenderedMessage();
+		VectorAppender::append( event );
+		if (LogString::npos != lsMsg.find(LOG4CXX_STR("World")))
+		{
+			LOG4CXX_LOGLS(logger, Level::getError(), LOG4CXX_STR("Some appender error"));
+			LOG4CXX_LOGLS(logger, Level::getWarn(), LOG4CXX_STR("Some appender warning"));
+			LOG4CXX_LOGLS(logger, Level::getInfo(), LOG4CXX_STR("Some appender information"));
+			LOG4CXX_LOGLS(logger, Level::getDebug(), LOG4CXX_STR("Some appender detailed data"));
+		}
+	}
+};
+LOG4CXX_PTR_DEF(LoggingVectorAppender);
+
 /**
  * Tests of AsyncAppender.
  */
@@ -120,194 +181,742 @@ class AsyncAppenderTestCase : public AppenderSkeletonTestCase
 		LOGUNIT_TEST(testSetOptionThreshold);
 
 		LOGUNIT_TEST(closeTest);
-		LOGUNIT_TEST(test2);
-		LOGUNIT_TEST(test3);
-		//
-		// TODO: test fails on Linux.
-		//LOGUNIT_TEST(testBadAppender);
-		LOGUNIT_TEST(testLocationInfoTrue);
-		LOGUNIT_TEST(testConfiguration);
+		LOGUNIT_TEST(testAutoMessageBufferSelection);
+		LOGUNIT_TEST(testEventFlush);
+		LOGUNIT_TEST(testMultiThread);
+		LOGUNIT_TEST(testBadAppender);
+		LOGUNIT_TEST(testDispatcherRecoversFromAppenderExceptions);
+		LOGUNIT_TEST(testBufferOverflowBehavior);
+		LOGUNIT_TEST(testLoggingAppender);
+#if LOG4CXX_HAS_DOMCONFIGURATOR
+		LOGUNIT_TEST(testXMLConfiguration);
+		LOGUNIT_TEST(testAsyncLoggerXML);
+		LOGUNIT_TEST(testRecursiveConfiguration);
+#endif
+#if ENABLE_FAILING_APPENDER_SIMULATION_TESTING
+		LOGUNIT_TEST(testAsyncAppenderFallback);
+#endif
+		LOGUNIT_TEST(testAsyncLoggerProperties);
+#if LOG4CXX_ASYNC_BUFFER_SUPPORTS_FMT
+		LOGUNIT_TEST(testAsyncFmtLogging);
+#endif // LOG4CXX_ASYNC_BUFFER_SUPPORTS_FMT
 		LOGUNIT_TEST_SUITE_END();
 
+#ifdef _DEBUG
+	struct Fixture
+	{
+		Fixture() {
+			helpers::LogLog::setInternalDebugging(true);
+		}
+	} suiteFixture;
+#endif
 
 	public:
-		void setUp()
+		void setUp() override
 		{
 			AppenderSkeletonTestCase::setUp();
 		}
 
-		void tearDown()
+		void tearDown() override
 		{
 			LogManager::shutdown();
 			AppenderSkeletonTestCase::tearDown();
 		}
 
-		AppenderSkeleton* createAppenderSkeleton() const
+		AppenderSkeleton* createAppenderSkeleton() const override
 		{
 			return new AsyncAppender();
 		}
 
-		// this test checks whether it is possible to write to a closed AsyncAppender
+		// Check it is not possible to write to a closed AsyncAppender
 		void closeTest()
 		{
-			LoggerPtr root = Logger::getRootLogger();
-			LayoutPtr layout = LayoutPtr(new SimpleLayout());
-			VectorAppenderPtr vectorAppender = VectorAppenderPtr(new VectorAppender());
-			AsyncAppenderPtr asyncAppender = AsyncAppenderPtr(new AsyncAppender());
-			asyncAppender->setName(LOG4CXX_STR("async-CloseTest"));
+			AsyncAppenderPtr asyncAppender;
+			auto r = LogManager::getLoggerRepository();
+			r->ensureIsConfigured([r, &asyncAppender]()
+			{
+				asyncAppender = std::make_shared<AsyncAppender>();
+				asyncAppender->setName(LOG4CXX_STR("async-CloseTest"));
+				r->getRootLogger()->addAppender(asyncAppender);
+				r->setConfigured(true);
+			});
+			LOGUNIT_ASSERT(asyncAppender);
+			auto vectorAppender = std::make_shared<VectorAppender>();
 			asyncAppender->addAppender(vectorAppender);
-			root->addAppender(asyncAppender);
 
+			auto root = r->getRootLogger();
 			root->debug(LOG4CXX_TEST_STR("m1"));
 			asyncAppender->close();
 			root->debug(LOG4CXX_TEST_STR("m2"));
 
-			const std::vector<spi::LoggingEventPtr>& v = vectorAppender->getVector();
-			LOGUNIT_ASSERT_EQUAL((size_t) 1, v.size());
-		}
-
-		// this test checks whether appenders embedded within an AsyncAppender are also
-		// closed
-		void test2()
-		{
-			LoggerPtr root = Logger::getRootLogger();
-			LayoutPtr layout = SimpleLayoutPtr(new SimpleLayout());
-			VectorAppenderPtr vectorAppender = VectorAppenderPtr(new VectorAppender());
-			AsyncAppenderPtr asyncAppender = AsyncAppenderPtr(new AsyncAppender());
-			asyncAppender->setName(LOG4CXX_STR("async-test2"));
-			asyncAppender->addAppender(vectorAppender);
-			root->addAppender(asyncAppender);
-
-			root->debug(LOG4CXX_TEST_STR("m1"));
-			asyncAppender->close();
-			root->debug(LOG4CXX_TEST_STR("m2"));
-
-			const std::vector<spi::LoggingEventPtr>& v = vectorAppender->getVector();
-			LOGUNIT_ASSERT_EQUAL((size_t) 1, v.size());
+			// Check one message was received
+			LOGUNIT_ASSERT_EQUAL(vectorAppender->getEventCount(), 1);
+			// Check appender embedded within an AsyncAppender is also closed
 			LOGUNIT_ASSERT(vectorAppender->isClosed());
 		}
 
-		// this test checks whether appenders embedded within an AsyncAppender are also
-		// closed
-		void test3()
+		// Test behaviour when logging with a char type that is not logchar
+		void testAutoMessageBufferSelection()
 		{
-			size_t LEN = 200;
-			LoggerPtr root = Logger::getRootLogger();
-			VectorAppenderPtr vectorAppender = VectorAppenderPtr(new VectorAppender());
-			AsyncAppenderPtr asyncAppender = AsyncAppenderPtr(new AsyncAppender());
-			asyncAppender->setName(LOG4CXX_STR("async-test3"));
-			asyncAppender->addAppender(vectorAppender);
-			root->addAppender(asyncAppender);
+			// Configure Log4cxx
+			VectorAppenderPtr vectorAppender;
+			auto r = LogManager::getLoggerRepository();
+			r->ensureIsConfigured([r, &vectorAppender]()
+			{
+				vectorAppender = std::make_shared<VectorAppender>();
+				r->getRootLogger()->addAppender(vectorAppender);
+				r->setConfigured(true);
+			});
+			LogString logStr = LOG4CXX_STR("Some logchar string ");
+#if LOG4CXX_LOGCHAR_IS_UTF8
+			std::wstring otherStr(L"Some non-logchar string ");
+#else // !LOG4CXX_LOGCHAR_IS_UTF8
+			std::string otherStr("Some non-logchar string ");
+#endif // !LOG4CXX_LOGCHAR_IS_UTF8
 
+			// Log some messages
+			auto root = r->getRootLogger();
+			LOG4CXX_INFO(root, logStr << 42);
+			LOG4CXX_INFO_ASYNC(root, logStr << 42);
+			int expectedEventCount = 2;
+#if !LOG4CXX_LOGCHAR_IS_UTF8 || LOG4CXX_WCHAR_T_API
+			LOG4CXX_INFO(root, otherStr << 42);
+			++expectedEventCount;
+#if LOG4CXX_CONCEPTS
+			LOG4CXX_INFO_ASYNC(root, otherStr << 42);
+			++expectedEventCount;
+#endif // LOG4CXX_CONCEPTS
+#endif // !LOG4CXX_LOGCHAR_IS_UTF8 || LOG4CXX_WCHAR_T_API
+
+			// Check all messages were received
+			auto allEventsReceived = vectorAppender->waitForEventCount(expectedEventCount, std::chrono::milliseconds( 100 ) );
+			LOGUNIT_ASSERT(allEventsReceived);
+			auto lastEvent = vectorAppender->getEvent(1);
+			int eventNumber = 0;
+			for (auto& pEvent : vectorAppender->getVector())
+			{
+				++eventNumber;
+				LogLog::debug(pEvent->getRenderedMessage());
+				if (2 == eventNumber || 4 == eventNumber)
+					LOGUNIT_ASSERT_EQUAL(lastEvent->getRenderedMessage(), pEvent->getRenderedMessage());
+				lastEvent = pEvent;
+			}
+#ifdef GENERATE_THE_STATIC_ASSERT_COMPILATION_ERROR
+			struct AStruct
+			{
+				int value;
+			} data{ 43 };
+			LOG4CXX_INFO_ASYNC(root, "data.value=" << data);
+#endif
+		}
+
+		// this test checks all messages are delivered when an AsyncAppender is closed
+		void testEventFlush()
+		{
+			// Configure Log4cxx
+			auto r = LogManager::getLoggerRepository();
+			AsyncAppenderPtr asyncAppender;
+			r->ensureIsConfigured([r, &asyncAppender]()
+			{
+				asyncAppender = std::make_shared<AsyncAppender>();
+				asyncAppender->setName(LOG4CXX_STR("async-testEventFlush"));
+				r->getRootLogger()->addAppender(asyncAppender);
+				r->setConfigured(true);
+			});
+			LOGUNIT_ASSERT(asyncAppender);
+			auto vectorAppender = std::make_shared<VectorAppender>();
+			vectorAppender->setMillisecondDelay(1);
+			asyncAppender->addAppender(vectorAppender);
+
+			// Log some messages
+			auto root = r->getRootLogger();
+			size_t LEN = 200; // Larger than default buffer size (128)
 			for (size_t i = 0; i < LEN; i++)
 			{
-				LOG4CXX_DEBUG(root, "message" << i);
+				LOG4CXX_DEBUG_ASYNC(root, "message" << i);
 			}
-
 			asyncAppender->close();
-			root->debug(LOG4CXX_TEST_STR("m2"));
+			root->debug(LOG4CXX_STR("m2"));
 
-			const std::vector<spi::LoggingEventPtr>& v = vectorAppender->getVector();
-			LOGUNIT_ASSERT_EQUAL(LEN, v.size());
+			auto allEventsReceived = vectorAppender->waitForEventCount(LEN, std::chrono::milliseconds( 100 ) );
+			LOGUNIT_ASSERT(allEventsReceived);
+			int i{ 0 };
+			for (auto e : vectorAppender->getVector())
+			{
+				LogString m(LOG4CXX_STR("message"));
+				StringHelper::toString(i, m);
+				LOGUNIT_ASSERT_EQUAL(m, e->getRenderedMessage());
+				++i;
+			}
 			LOGUNIT_ASSERT_EQUAL(true, vectorAppender->isClosed());
 		}
 
+
+		// this test checks all messages are delivered from multiple threads
+		void testMultiThread()
+		{
+			// Configure Log4cxx
+			AsyncAppenderPtr asyncAppender;
+			auto r = LogManager::getLoggerRepository();
+			r->ensureIsConfigured([r, &asyncAppender]()
+			{
+				asyncAppender = std::make_shared<AsyncAppender>();
+				asyncAppender->setName(LOG4CXX_STR("async-testMultiThread"));
+				r->getRootLogger()->addAppender(asyncAppender);
+				r->setConfigured(true);
+			});
+			LOGUNIT_ASSERT(asyncAppender);
+			auto vectorAppender = std::make_shared<VectorAppender>();
+			asyncAppender->addAppender(vectorAppender);
+
+			// Log some messages
+			int LEN = 2000; // Larger than default buffer size (128)
+			auto threadCount = std::max(static_cast<int>(std::thread::hardware_concurrency() - 1), 2);
+			auto root = r->getRootLogger();
+			std::vector<std::thread> threads;
+			for ( int x = 0; x < threadCount; x++ )
+			{
+				threads.emplace_back([root, LEN]()
+				{
+					for (int i = 0; i < LEN; i++)
+					{
+						LOG4CXX_DEBUG_ASYNC(root, "message" << i);
+					}
+				});
+			}
+
+			for ( auto& thr : threads )
+			{
+				if ( thr.joinable() )
+				{
+					thr.join();
+				}
+			}
+			asyncAppender->close();
+
+			// Check all message were received
+			LOGUNIT_ASSERT_EQUAL(LEN*threadCount, vectorAppender->getEventCount());
+			std::map<LogString, int> perThreadCount;
+			std::vector<int> msgCount(LEN, 0);
+			for (auto m : vectorAppender->getVector())
+			{
+				auto i = StringHelper::toInt(m->getRenderedMessage().substr(7));
+				LOGUNIT_ASSERT(0 <= i);
+				LOGUNIT_ASSERT(i < LEN);
+				++msgCount[i];
+				++perThreadCount[m->getThreadName()];
+			}
+			LOGUNIT_ASSERT_EQUAL(threadCount, (int)perThreadCount.size());
+			for (auto& item : perThreadCount)
+			{
+				LOGUNIT_ASSERT_EQUAL(item.second, LEN);
+			}
+			for (size_t i = 0; i < LEN; i++)
+				LOGUNIT_ASSERT_EQUAL(msgCount[i], threadCount);
+		}
+
 		/**
-		 * Tests that a bad appender will switch async back to sync.
+		 * Checks that async will switch a bad appender to another appender.
 		 */
 		void testBadAppender()
 		{
-			AppenderPtr nullPointerAppender = AppenderPtr(new NullPointerAppender());
-			AsyncAppenderPtr asyncAppender = AsyncAppenderPtr(new AsyncAppender());
-			asyncAppender->addAppender(nullPointerAppender);
-			asyncAppender->setBufferSize(5);
-			Pool p;
-			asyncAppender->activateOptions(p);
-			LoggerPtr root = Logger::getRootLogger();
-			root->addAppender(asyncAppender);
-			LOG4CXX_INFO(root, "Message");
-			std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+			// Configure Log4cxx
+			AsyncAppenderPtr asyncAppender;
+			auto r = LogManager::getLoggerRepository();
+			r->ensureIsConfigured([r, &asyncAppender]()
+			{
+				asyncAppender = std::make_shared<AsyncAppender>();
+				asyncAppender->setName(LOG4CXX_STR("async-testBadAppender"));
+				asyncAppender->addAppender(std::make_shared<NullPointerAppender>());
+				asyncAppender->activateOptions();
+				r->getRootLogger()->addAppender(asyncAppender);
+				r->setConfigured(true);
+			});
+			LOGUNIT_ASSERT(asyncAppender);
+			auto vectorAppender = std::make_shared<VectorAppender>();
+			vectorAppender->setName(LOG4CXX_STR("async-memoryAppender"));
+			auto root = r->getRootLogger();
+			auto errorHandler = std::make_shared<varia::FallbackErrorHandler>();
+			errorHandler->setAppender(asyncAppender);
+			errorHandler->setBackupAppender(vectorAppender);
+			errorHandler->setLogger(root);
+			asyncAppender->setErrorHandler(errorHandler);
 
-			try
-			{
-				LOG4CXX_INFO(root, "Message");
-				LOGUNIT_FAIL("Should have thrown exception");
-			}
-			catch (NullPointerException&)
-			{
-			}
+			// Log some messages
+			LOG4CXX_INFO(root, "Message");
+			std::this_thread::sleep_for( std::chrono::milliseconds( 30 ) );
+			LOGUNIT_ASSERT(errorHandler->errorReported());
+			LOG4CXX_INFO(root, "Message");
+
+			// Check a message was received
+			auto eventReceived = vectorAppender->waitForEventCount(1, std::chrono::milliseconds( 30 ) );
+			LOGUNIT_ASSERT(eventReceived);
 		}
 
 		/**
-		 * Tests non-blocking behavior.
+		 * Checks the dispatch thread survives exceptions thrown by an
+		 * attached appender. Regression test: two exceptions at any two
+		 * points in the dispatch thread's lifetime used to stop dispatching
+		 * permanently, after which producers using the default Blocking=true
+		 * hung forever once the buffer filled.
 		 */
-		void testLocationInfoTrue()
+		void testDispatcherRecoversFromAppenderExceptions()
 		{
-			BlockableVectorAppenderPtr blockableAppender = BlockableVectorAppenderPtr(new BlockableVectorAppender());
-			AsyncAppenderPtr async = AsyncAppenderPtr(new AsyncAppender());
-			async->addAppender(blockableAppender);
-			async->setBufferSize(5);
-			async->setLocationInfo(true);
-			async->setBlocking(false);
-			Pool p;
-			async->activateOptions(p);
-			LoggerPtr rootLogger = Logger::getRootLogger();
-			rootLogger->addAppender(async);
+			// Configure Log4cxx
+			AsyncAppenderPtr async;
+			auto r = LogManager::getLoggerRepository();
+			r->ensureIsConfigured([r, &async]()
 			{
-				std::unique_lock<std::mutex> sync(blockableAppender->getBlocker());
+				async = std::make_shared<AsyncAppender>();
+				async->setName(LOG4CXX_STR("async-testDispatcherRecovers"));
+				async->activateOptions();
+				r->getRootLogger()->addAppender(async);
+				r->setConfigured(true);
+			});
+			LOGUNIT_ASSERT(async);
+			// The old code tolerated only 4 exceptions over the appender lifetime
+			// (2 per dispatch thread incarnation, one restart allowed)
+			auto failingAppender = std::make_shared<TransientlyFailingVectorAppender>(4);
+			failingAppender->setName(LOG4CXX_STR("async-transientlyFailingVector"));
+			async->addAppender(failingAppender);
+
+			// Log messages until one has been delivered (bounded wait)
+			auto root = r->getRootLogger();
+			for (int i = 0; 0 <= failingAppender->remainingFailures() && i < 100; i++)
+			{
+				LOG4CXX_INFO_ASYNC(root, "message" << i);
+				std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+			}
+			LOG4CXX_INFO_ASYNC(root, "final message");
+			async->close();
+
+			// Check dispatching recovered once the transient fault cleared
+			auto eventsReceived = failingAppender->getEventCount();
+			LOGUNIT_ASSERT(0 < eventsReceived);
+			LOGUNIT_ASSERT(failingAppender->getEvent(eventsReceived)->getRenderedMessage() == LOG4CXX_STR("final message"));
+		}
+
+		/**
+		 * Tests behavior when the the async buffer overflows.
+		 */
+		void testBufferOverflowBehavior()
+		{
+			// Configure Log4cxx
+			AsyncAppenderPtr async;
+			auto r = LogManager::getLoggerRepository();
+			r->ensureIsConfigured([r, &async]()
+			{
+				async = std::make_shared<AsyncAppender>();
+				async->setName(LOG4CXX_STR("async-testBufferOverflowBehavior"));
+				async->setBufferSize(5);
+				async->setBlocking(false);
+				async->activateOptions();
+				r->getRootLogger()->addAppender(async);
+				r->setConfigured(true);
+			});
+			LOGUNIT_ASSERT(async);
+			auto blockableAppender = std::make_shared<BlockableVectorAppender>();
+			blockableAppender->setName(LOG4CXX_STR("async-blockableVector"));
+			async->addAppender(blockableAppender);
+
+			// Log some messages
+			auto rootLogger = r->getRootLogger();
+			LOG4CXX_INFO_ASYNC(rootLogger, "Hello, World"); // This causes the dispatch thread creation
+			std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) ); // Wait for the dispatch thread  to be ready
+			{
+				std::lock_guard<std::mutex> sync(blockableAppender->getBlocker());
 
 				for (int i = 0; i < 140; i++)
 				{
-					LOG4CXX_INFO(rootLogger, "Hello, World");
-					std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+					LOG4CXX_INFO_ASYNC(rootLogger, "Hello, World " << i);
 				}
 
-				LOG4CXX_ERROR(rootLogger, "That's all folks.");
+				LOG4CXX_ERROR_ASYNC(rootLogger, "That's all folks.");
 			}
 			async->close();
-			const std::vector<spi::LoggingEventPtr>& events = blockableAppender->getVector();
-			LOGUNIT_ASSERT(events.size() > 0);
-			LoggingEventPtr initialEvent = events[0];
-			LoggingEventPtr discardEvent = events[events.size() - 1];
-			LOGUNIT_ASSERT(initialEvent->getMessage() == LOG4CXX_STR("Hello, World"));
-			LOGUNIT_ASSERT(discardEvent->getMessage().substr(0, 10) == LOG4CXX_STR("Discarded "));
-			LOGUNIT_ASSERT_EQUAL(log4cxx::spi::LocationInfo::getLocationUnavailable().getClassName(),
+
+			// Check which messages were output
+			auto events = blockableAppender->getVector();
+			LOGUNIT_ASSERT(!events.empty());
+			LOGUNIT_ASSERT(events.size() <= 142);
+			LoggingEventPtr initialEvent = events.front();
+			LOGUNIT_ASSERT(initialEvent->getRenderedMessage() == LOG4CXX_STR("Hello, World"));
+			std::map<LevelPtr, int> levelCount;
+			int discardMessageCount{ 0 };
+			LoggingEventPtr discardEvent;
+			for (auto& e : events)
+			{
+				auto message = e->getRenderedMessage();
+				LogLog::debug(message);
+				++levelCount[e->getLevel()];
+				if (message.substr(0, 10) == LOG4CXX_STR("Discarded "))
+				{
+					++discardMessageCount;
+					discardEvent = e;
+				}
+			}
+			if (helpers::LogLog::isDebugEnabled())
+			{
+				LogString msg{ LOG4CXX_STR("messageCounts:") };
+				for (auto& item : levelCount)
+				{
+					msg += LOG4CXX_STR(" ");
+					msg += item.first->toString();
+					msg += LOG4CXX_STR(" ");
+					StringHelper::toString(item.second, msg);
+				}
+				msg += LOG4CXX_STR(" ");
+				msg += LOG4CXX_STR("Discarded ");
+				StringHelper::toString(discardMessageCount, msg);
+				helpers::LogLog::debug(msg);
+			}
+			// Check this test has activated the discard logic
+			LOGUNIT_ASSERT(1 <= discardMessageCount);
+			LOGUNIT_ASSERT(5 < levelCount[Level::getInfo()]);
+			// Check the discard message is the logging event of the highest level
+			LOGUNIT_ASSERT_EQUAL(levelCount[Level::getError()], 1);
+			LOGUNIT_ASSERT_EQUAL(discardEvent->getLevel(), Level::getError());
+			// Check the discard message does not have location info
+			LOGUNIT_ASSERT_EQUAL(LOG4CXX_NS::spi::LocationInfo::getLocationUnavailable().getClassName(),
 				discardEvent->getLocationInformation().getClassName());
 		}
 
-		void testConfiguration()
+		/**
+		 * Tests behavior when the appender attached to a AsyncAppender adds logging events
+		 */
+		void testLoggingAppender()
 		{
-			log4cxx::xml::DOMConfigurator::configure("input/xml/asyncAppender1.xml");
-			AsyncAppenderPtr asyncAppender = log4cxx::cast<AsyncAppender>(Logger::getRootLogger()->getAppender(LOG4CXX_STR("ASYNC")));
-			LOGUNIT_ASSERT(!(asyncAppender == 0));
-			LOGUNIT_ASSERT_EQUAL(100, asyncAppender->getBufferSize());
-			LOGUNIT_ASSERT_EQUAL(false, asyncAppender->getBlocking());
-			LOGUNIT_ASSERT_EQUAL(true, asyncAppender->getLocationInfo());
-			AppenderList nestedAppenders(asyncAppender->getAllAppenders());
-			// TODO:
-			// test seems to work okay, but have not found a working way to
-			// get a reference to the nested vector appender
-			//
-			// LOGUNIT_ASSERT_EQUAL((size_t) 1, nestedAppenders.size());
-			// VectorAppenderPtr vectorAppender(nestedAppenders[0]);
-			// LOGUNIT_ASSERT(0 != vectorAppender);
-			LoggerPtr root(Logger::getRootLogger());
-
-			size_t LEN = 20;
-
-			for (size_t i = 0; i < LEN; i++)
+			// Configure Log4cxx
+			AsyncAppenderPtr async;
+			auto r = LogManager::getLoggerRepository();
+			r->ensureIsConfigured([r, &async]()
 			{
-				LOG4CXX_DEBUG(root, "message" << i);
-			}
+				async = std::make_shared<AsyncAppender>();
+				async->setName(LOG4CXX_STR("withLoggingAppender"));
+				async->setBufferSize(5);
+				async->activateOptions();
+				r->getRootLogger()->addAppender(async);
+				r->setConfigured(true);
+			});
+			LOGUNIT_ASSERT(async);
+			auto loggingAppender = std::make_shared<LoggingVectorAppender>();
+			loggingAppender->setName(LOG4CXX_STR("loggingAppender"));
+			async->addAppender(loggingAppender);
 
-			asyncAppender->close();
-			// const std::vector<spi::LoggingEventPtr>& v = vectorAppender->getVector();
-			// LOGUNIT_ASSERT_EQUAL(LEN, v.size());
-			// LOGUNIT_ASSERT_EQUAL(true, vectorAppender->isClosed());
+			// Log some messages
+			auto rootLogger = r->getRootLogger();
+			LOG4CXX_INFO_ASYNC(rootLogger, "Hello, World"); // This causes the dispatch thread creation
+			std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) ); // Wait for the dispatch thread  to be ready
+			for (int i = 0; i < 10; i++)
+			{
+				LOG4CXX_INFO_ASYNC(rootLogger, "Hello, World " << i);
+			}
+			LOG4CXX_INFO_ASYNC(rootLogger, "Bye bye World");
+			std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) ); // Wait for the dispatch thread take the above events
+			async->close();
+
+			// Check which messages were received
+			auto events = loggingAppender->getVector();
+			std::map<LevelPtr, int> levelCount;
+			int discardMessageCount{ 0 };
+			int eventCount[] = { 0, 0 };
+			for (auto& e : events)
+			{
+				++levelCount[e->getLevel()];
+				auto message = e->getRenderedMessage();
+				LogLog::debug(message);
+				auto isAppenderMessage = (message.npos == message.find(LOG4CXX_STR("World")));
+				++eventCount[isAppenderMessage];
+				if (message.substr(0, 10) == LOG4CXX_STR("Discarded "))
+				{
+					++discardMessageCount;
+					LOGUNIT_ASSERT(isAppenderMessage);
+				}
+			}
+			if (helpers::LogLog::isDebugEnabled())
+			{
+				LogString msg{ LOG4CXX_STR("messageCounts:") };
+				msg += LOG4CXX_STR(" nonAppender ");
+				StringHelper::toString(eventCount[0], msg);
+				msg += LOG4CXX_STR(" appender ");
+				StringHelper::toString(eventCount[1], msg);
+				msg += LOG4CXX_STR(" discard ");
+				StringHelper::toString(discardMessageCount, msg);
+				LogLog::debug(msg);
+			}
+			LOGUNIT_ASSERT(12 < events.size());
+			LOGUNIT_ASSERT_EQUAL(12, eventCount[0]);
 		}
 
+#if LOG4CXX_HAS_DOMCONFIGURATOR
+		void testXMLConfiguration()
+		{
+			// Configure Log4cxx
+			auto status = xml::DOMConfigurator::configure("input/xml/asyncAppender1.xml");
+			LOGUNIT_ASSERT_EQUAL(status, spi::ConfigurationStatus::Configured);
+
+			// Check configuration is as expected
+			auto  root = Logger::getRootLogger();
+			auto asyncAppender = LOG4CXX_NS::cast<AsyncAppender>(root->getAppender(LOG4CXX_STR("ASYNC")));
+			LOGUNIT_ASSERT(asyncAppender);
+			LOGUNIT_ASSERT_EQUAL(100, asyncAppender->getBufferSize());
+			LOGUNIT_ASSERT_EQUAL(false, asyncAppender->getBlocking());
+			auto nestedAppenders = asyncAppender->getAllAppenders();
+			LOGUNIT_ASSERT_EQUAL(1, int(nestedAppenders.size()));
+
+			// Log some messages
+			int LEN = 20;
+			for (int i = 0; i < LEN; i++)
+			{
+				LOG4CXX_DEBUG_ASYNC(root, "message" << i);
+			}
+			asyncAppender->close();
+
+			// Check all message were received
+			auto vectorAppender = LOG4CXX_NS::cast<VectorAppender>(asyncAppender->getAppender(LOG4CXX_STR("VECTOR")));
+			LOGUNIT_ASSERT(vectorAppender);
+			LOGUNIT_ASSERT_EQUAL(LEN, vectorAppender->getEventCount());
+			LOGUNIT_ASSERT(vectorAppender->isClosed());
+		}
+
+		void testAsyncLoggerXML()
+		{
+			// Configure Log4cxx
+			auto status = xml::DOMConfigurator::configure("input/xml/asyncLogger.xml");
+			LOGUNIT_ASSERT_EQUAL(status, spi::ConfigurationStatus::Configured);
+
+			// Check configuration is as expected
+			auto  root = Logger::getRootLogger();
+			auto appenders = root->getAllAppenders();
+			LOGUNIT_ASSERT_EQUAL(1, int(appenders.size()));
+			auto asyncAppender = LOG4CXX_NS::cast<AsyncAppender>(appenders.front());
+			LOGUNIT_ASSERT(asyncAppender);
+
+			// Log some messages
+			int LEN = 20;
+			for (int i = 0; i < LEN; i++)
+			{
+				LOG4CXX_INFO_ASYNC(root, "message" << i);
+			}
+			asyncAppender->close();
+
+			// Check all message were received
+			auto vectorAppender = LOG4CXX_NS::cast<VectorAppender>(asyncAppender->getAppender(LOG4CXX_STR("VECTOR")));
+			LOGUNIT_ASSERT(vectorAppender);
+			LOGUNIT_ASSERT_EQUAL(LEN, vectorAppender->getEventCount());
+			LOGUNIT_ASSERT(vectorAppender->isClosed());
+		}
+
+		void testRecursiveConfiguration()
+		{
+			// Configure Log4cxx
+			auto status = xml::DOMConfigurator::configure("input/xml/recursiveConfig.xml");
+			LOGUNIT_ASSERT_EQUAL(status, spi::ConfigurationStatus::Configured);
+
+			// Check configuration is as expected
+			auto  root = Logger::getRootLogger();
+			auto appenders = root->getAllAppenders();
+			LOGUNIT_ASSERT_EQUAL(1, int(appenders.size()));
+			auto asyncAppender = LOG4CXX_NS::cast<AsyncAppender>(appenders.front());
+			LOGUNIT_ASSERT(asyncAppender);
+			VectorAppenderPtr vectorAppender;
+			for (auto attachedAppender : asyncAppender->getAllAppenders())
+			{
+				if (auto async2 = LOG4CXX_NS::cast<AsyncAppender>(attachedAppender))
+				{
+					for (auto appender : async2->getAllAppenders())
+					{
+						vectorAppender = LOG4CXX_NS::cast<VectorAppender>(appender);
+						if (vectorAppender)
+							break;
+					}
+				}
+			}
+			LOGUNIT_ASSERT(vectorAppender);
+
+			// Log some messages
+			int LEN = 20;
+			for (int i = 0; i < LEN; i++)
+			{
+				LOG4CXX_INFO_ASYNC(root, "message" << i);
+			}
+			auto allEventsReceived = vectorAppender->waitForEventCount(LEN, std::chrono::milliseconds( 100 ) );
+			asyncAppender->close();
+
+			// Check all message were received
+			LOGUNIT_ASSERT_EQUAL(LEN, vectorAppender->getEventCount());
+			LOGUNIT_ASSERT(vectorAppender->isClosed());
+		}
+#endif
+
+#if ENABLE_FAILING_APPENDER_SIMULATION_TESTING
+		void testAsyncAppenderFallback()
+		{
+			// Configure Log4cxx
+			auto status = xml::DOMConfigurator::configure("input/xml/asyncWithFallback.xml");
+			LOGUNIT_ASSERT_EQUAL(status, spi::ConfigurationStatus::Configured);
+
+			// Check configuration is as expected
+			auto  root = Logger::getRootLogger();
+			auto appenders = root->getAllAppenders();
+			LOGUNIT_ASSERT_EQUAL(1, int(appenders.size()));
+			auto asyncAppender = LOG4CXX_NS::cast<AsyncAppender>(appenders.front());
+			LOGUNIT_ASSERT(asyncAppender);
+			auto asyncAppenders = asyncAppender->getAllAppenders();
+			LOGUNIT_ASSERT_EQUAL(1, int(asyncAppenders.size()));
+			auto primaryAppender = LOG4CXX_NS::cast<FileAppender>(asyncAppenders.front());
+			LOGUNIT_ASSERT(primaryAppender);
+			auto primaryFileName = primaryAppender->getFile();
+			LOGUNIT_ASSERT(11 < primaryFileName.size());
+			LOGUNIT_ASSERT_EQUAL(LOG4CXX_STR("Primary.log"), primaryFileName.substr(primaryFileName.size() - 11));
+
+			// Log some messages
+			size_t LEN = 2000;
+			for (size_t i = 0; i < LEN; i++)
+			{
+				LOG4CXX_INFO_ASYNC(root, "message " << i);
+			}
+			std::this_thread::sleep_for( std::chrono::milliseconds( 100 ) );
+			asyncAppenders = asyncAppender->getAllAppenders();
+			LOGUNIT_ASSERT_EQUAL(1, int(asyncAppenders.size()));
+			auto backupAppender = LOG4CXX_NS::cast<FileAppender>(asyncAppenders.front());
+			LOGUNIT_ASSERT(backupAppender);
+			auto backupFileName = backupAppender->getFile();
+			LOGUNIT_ASSERT(10 < backupFileName.size());
+			LOGUNIT_ASSERT_EQUAL(LOG4CXX_STR("Backup.log"), backupFileName.substr(backupFileName.size() - 10));
+
+			// Check all messages were written
+			std::vector<int> messageCount;
+			for (auto const& filePathLS : {primaryFileName, backupFileName})
+			{
+				LOG4CXX_ENCODE_CHAR(filePath, filePathLS);
+				std::ifstream input(filePath);
+				for (std::string line; std::getline(input, line);)
+				{
+					 auto pos = line.rfind(' ');
+					 if (line.npos != pos && pos + 1 < line.size())
+					 {
+						try
+						{
+							auto msgNumber = std::stoull(line.substr(pos));
+							if (messageCount.size() <= msgNumber)
+								messageCount.resize(msgNumber + 1);
+							++messageCount[msgNumber];
+						}
+						catch (std::exception const& ex)
+						{
+							LogString msg;
+							helpers::Transcoder::decode(ex.what(), msg);
+							msg += LOG4CXX_STR(" processing\n");
+							helpers::Transcoder::decode(line, msg);
+							helpers::LogLog::warn(msg);
+						}
+					 }
+				}
+			}
+			for (auto& count : messageCount)
+				LOGUNIT_ASSERT_EQUAL(1, count);
+		}
+#endif
+
+		void testAsyncLoggerProperties()
+		{
+			// Configure Log4cxx
+			auto status = PropertyConfigurator::configure("input/asyncLogger.properties");
+			LOGUNIT_ASSERT_EQUAL(status, spi::ConfigurationStatus::Configured);
+
+			// Check configuration is as expected
+			auto  root = Logger::getRootLogger();
+			auto appenders = root->getAllAppenders();
+			LOGUNIT_ASSERT_EQUAL(1, int(appenders.size()));
+			auto asyncAppender = LOG4CXX_NS::cast<AsyncAppender>(appenders.front());
+			LOGUNIT_ASSERT(asyncAppender);
+
+			// Log some messages
+			int LEN = 20;
+			for (int i = 0; i < LEN; i++)
+			{
+				LOG4CXX_INFO_ASYNC(root, "message" << i);
+			}
+			asyncAppender->close();
+
+			// Check all message were received
+			auto vectorAppender = LOG4CXX_NS::cast<VectorAppender>(asyncAppender->getAppender(LOG4CXX_STR("VECTOR")));
+			LOGUNIT_ASSERT(vectorAppender);
+			LOGUNIT_ASSERT_EQUAL(LEN, vectorAppender->getEventCount());
+			LOGUNIT_ASSERT(vectorAppender->isClosed());
+		}
+
+#if LOG4CXX_ASYNC_BUFFER_SUPPORTS_FMT
+		/**
+		 * Tests asynchronous logging using FMT
+		 */
+		void testAsyncFmtLogging()
+		{
+			// Configure Log4cxx
+			AsyncAppenderPtr async;
+			auto r = LogManager::getLoggerRepository();
+			r->ensureIsConfigured([r, &async]()
+			{
+				async = std::make_shared<AsyncAppender>();
+				async->setName(LOG4CXX_STR("withAsyncFmtLogging"));
+				r->getRootLogger()->addAppender(async);
+				r->setConfigured(true);
+			});
+			LOGUNIT_ASSERT(async);
+			auto eventStore = std::make_shared<VectorAppender>();
+			eventStore->setName(LOG4CXX_STR("VectorAppender"));
+			async->addAppender(eventStore);
+
+			// Log some messages
+			auto rootLogger = r->getRootLogger();
+			LOG4CXX_INFO_FMT_ASYNC(rootLogger, LOG4CXX_STR("Hello, {}"), LOG4CXX_STR("World"));
+			for (MyStruct i = {0}; i.value < 10; ++i.value)
+			{
+				LOG4CXX_INFO_FMT_ASYNC(rootLogger, LOG4CXX_STR("Hello, {}"), i);
+			}
+			LOG4CXX_INFO_FMT_ASYNC(rootLogger, "Bye bye {}", "World");
+			async->close();
+
+			// Check all parts of all messages were received
+			std::vector<int> messageCount;
+			int eventCount[] = { 0, 0 };
+			for (auto& e : eventStore->getVector())
+			{
+				auto message = e->getRenderedMessage();
+				//LogLog::debug(message);
+				auto isNumberedMessage = (message.npos == message.find(LOG4CXX_STR("World")));
+				++eventCount[isNumberedMessage];
+				if (isNumberedMessage)
+				{
+					 auto pos = message.rfind(' ');
+					 if (message.npos != pos && pos + 1 < message.size())
+					 {
+						try
+						{
+							auto msgNumber = StringHelper::toInt(message.substr(pos));
+							if (messageCount.size() <= msgNumber)
+								messageCount.resize(msgNumber + 1);
+							++messageCount[msgNumber];
+						}
+						catch (std::exception const& ex)
+						{
+							LogString msg;
+							helpers::Transcoder::decode(ex.what(), msg);
+							msg += LOG4CXX_STR(" processing\n");
+							helpers::Transcoder::decode(message, msg);
+							helpers::LogLog::warn(msg);
+						}
+					 }
+				}
+			}
+			LOGUNIT_ASSERT_EQUAL(int(messageCount.size()), eventCount[1]);
+			for (auto& count : messageCount)
+				LOGUNIT_ASSERT_EQUAL(count, messageCount.front());
+			LOGUNIT_ASSERT_EQUAL(2, eventCount[0]);
+		}
+#endif // LOG4CXX_ASYNC_BUFFER_SUPPORTS_FMT
 
 };
 
 LOGUNIT_TEST_SUITE_REGISTRATION(AsyncAppenderTestCase);
-#endif

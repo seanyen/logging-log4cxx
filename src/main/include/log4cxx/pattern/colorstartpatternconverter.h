@@ -20,7 +20,7 @@
 
 #include <log4cxx/pattern/loggingeventpatternconverter.h>
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 namespace pattern
 {
@@ -35,10 +35,7 @@ namespace pattern
 class LOG4CXX_EXPORT ColorStartPatternConverter
 	: public LoggingEventPatternConverter
 {
-		/**
-		 * Private constructor.
-		 */
-		ColorStartPatternConverter();
+	struct ColorPatternConverterPrivate;
 
 	public:
 		DECLARE_LOG4CXX_PATTERN(ColorStartPatternConverter)
@@ -46,6 +43,8 @@ class LOG4CXX_EXPORT ColorStartPatternConverter
 		LOG4CXX_CAST_ENTRY(ColorStartPatternConverter)
 		LOG4CXX_CAST_ENTRY_CHAIN(LoggingEventPatternConverter)
 		END_LOG4CXX_CAST_MAP()
+
+		ColorStartPatternConverter();
 
 		/**
 		 * Obtains an instance of pattern converter.
@@ -57,9 +56,17 @@ class LOG4CXX_EXPORT ColorStartPatternConverter
 
 		using LoggingEventPatternConverter::format;
 
-		void format(const log4cxx::spi::LoggingEventPtr& event,
-			LogString& toAppendTo,
-			log4cxx::helpers::Pool& p) const;
+		void format( const spi::LoggingEventPtr& event, LogString& toAppendTo ) const override;
+
+		void setFatalColor(const LogString& color);
+		void setErrorColor(const LogString& color);
+		void setWarnColor(const LogString& color);
+		void setInfoColor(const LogString& color);
+		void setDebugColor(const LogString& color);
+		void setTraceColor(const LogString& color);
+
+	private:
+		void parseColor(const LogString& color, LogString* result);
 };
 
 }

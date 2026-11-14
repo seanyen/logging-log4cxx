@@ -19,27 +19,21 @@
 #ifndef _LOG4CXX_HELPER_PATTERN_CONVERTER_H
 #define _LOG4CXX_HELPER_PATTERN_CONVERTER_H
 
-#if defined(_MSC_VER)
-	#pragma warning (push)
-	#pragma warning ( disable: 4231 4251 4275 4786 )
-#endif
-
-
-
 #include <map>
 #include <vector>
+#include <functional>
 #include <log4cxx/helpers/class.h>
 #include <log4cxx/pattern/patternconverter.h>
 #include <log4cxx/pattern/formattinginfo.h>
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 namespace pattern
 {
 
-typedef PatternConverterPtr (*PatternConstructor)(const std::vector<LogString>& options);
+typedef std::function<PatternConverterPtr(const std::vector<LogString>& options)> PatternConstructor;
 typedef std::map<LogString, PatternConstructor> PatternMap;
-
+LOG4CXX_LIST_DEF(PatternConverterList, PatternConverterPtr);
 
 // Contributors:   Nelson Minar <(nelson@monkey.org>
 //                 Igor E. Poteryaev <jah@mail.ru>
@@ -107,17 +101,14 @@ class LOG4CXX_EXPORT PatternParser
 
 	public:
 		/**
-		 * Parse a format specifier.
-		 * @param pattern pattern to parse.
-		 * @param patternConverters list to receive pattern converters.
-		 * @param formattingInfos list to receive field specifiers corresponding to pattern converters.
-		 * @param rules map of stock pattern converters keyed by format specifier.
+		 * Convert \c pattern to converters using \c rules.
+		 * @param pattern a string specifying the conversion types and their properties.
+		 * @param rules a map of stock pattern converters keyed by name.
 		 */
-		static void parse(
-			const LogString& pattern,
-			std::vector<PatternConverterPtr>& patternConverters,
-			std::vector<FormattingInfoPtr>& formattingInfos,
-			const PatternMap& rules);
+		static PatternConverterList parse
+			( const LogString&      pattern
+			, const PatternMap&     rules
+			);
 
 	private:
 		/**
@@ -154,8 +145,8 @@ class LOG4CXX_EXPORT PatternParser
 			logchar c, const LogString& pattern, size_t i,
 			LogString& currentLiteral, const FormattingInfoPtr& formattingInfo,
 			const PatternMap&  rules,
-			std::vector<PatternConverterPtr>& patternConverters,
-			std::vector<FormattingInfoPtr>&  formattingInfos);
+			PatternConverterList& patternConverter
+			);
 
 		static bool isUnicodeIdentifierStart(logchar c);
 		static bool isUnicodeIdentifierPart(logchar c);
@@ -165,11 +156,6 @@ class LOG4CXX_EXPORT PatternParser
 
 }
 }
-
-
-#if defined(_MSC_VER)
-	#pragma warning (pop)
-#endif
 
 
 #endif

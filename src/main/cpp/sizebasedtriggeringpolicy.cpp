@@ -19,9 +19,9 @@
 #include <log4cxx/helpers/stringhelper.h>
 #include <log4cxx/helpers/optionconverter.h>
 
-using namespace log4cxx;
-using namespace log4cxx::rolling;
-using namespace log4cxx::helpers;
+using namespace LOG4CXX_NS;
+using namespace LOG4CXX_NS::rolling;
+using namespace LOG4CXX_NS::helpers;
 
 IMPLEMENT_LOG4CXX_OBJECT(SizeBasedTriggeringPolicy)
 
@@ -31,7 +31,7 @@ SizeBasedTriggeringPolicy::SizeBasedTriggeringPolicy()
 }
 
 bool SizeBasedTriggeringPolicy::isTriggeringEvent(Appender* /* appender */,
-	const log4cxx::spi::LoggingEventPtr& /* event */,
+	const LOG4CXX_NS::spi::LoggingEventPtr& /* event */,
 	const LogString& /* file */,
 	size_t fileLength)
 {
@@ -48,7 +48,7 @@ void SizeBasedTriggeringPolicy::setMaxFileSize(size_t l)
 	maxFileSize = l;
 }
 
-void SizeBasedTriggeringPolicy::activateOptions(Pool& /* p */)
+void SizeBasedTriggeringPolicy::activateOptions(  )
 {
 }
 
@@ -60,4 +60,6 @@ void SizeBasedTriggeringPolicy::setOption(const LogString& option, const LogStri
 	{
 		maxFileSize = OptionConverter::toFileSize(value, 10 * 1024 * 1024);
 	}
+	else
+		TriggeringPolicy::setOption(option, value);
 }

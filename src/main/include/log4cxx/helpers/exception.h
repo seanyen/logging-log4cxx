@@ -21,13 +21,15 @@
 #include <exception>
 #include <log4cxx/log4cxx.h>
 #include <log4cxx/logstring.h>
+#include <string>
 
 #ifdef _MSC_VER
 	#pragma warning ( push )
-	#pragma warning (disable : 4251 4275) // ::std::exception needs to have dll-interface
+	#pragma warning (disable : 4275) // ::std::exception needs to have dll-interface
+	#pragma warning (disable : 4251) // ::std::basic_string needs to have dll-interface
 #endif
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 namespace helpers
 {
@@ -39,12 +41,13 @@ class LOG4CXX_EXPORT Exception : public ::std::exception
 	public:
 		Exception(const char* msg);
 		Exception(const LogString& msg);
-		Exception(const Exception& src);
-		Exception& operator=(const Exception& src);
-		const char* what() const throw();
+		const char* what() const noexcept override;
+		static LogString makeMessage(const LogString& type, log4cxx_status_t stat);
+#if !LOG4CXX_LOGCHAR_IS_UTF8
+		static std::string makeMessage(const char* type, log4cxx_status_t stat);
+#endif
 	private:
-		enum { MSG_SIZE = 128 };
-		char msg[MSG_SIZE + 1];
+		std::string msg;
 }; // class Exception
 
 /** RuntimeException is the parent class of those exceptions that can be
@@ -55,8 +58,6 @@ class LOG4CXX_EXPORT RuntimeException : public Exception
 	public:
 		RuntimeException(log4cxx_status_t stat);
 		RuntimeException(const LogString& msg);
-		RuntimeException(const RuntimeException& msg);
-		RuntimeException& operator=(const RuntimeException& src);
 	private:
 		static LogString formatMessage(log4cxx_status_t stat);
 }; // class RuntimeException
@@ -68,8 +69,6 @@ class LOG4CXX_EXPORT  NullPointerException : public RuntimeException
 {
 	public:
 		NullPointerException(const LogString& msg);
-		NullPointerException(const NullPointerException& msg);
-		NullPointerException& operator=(const NullPointerException& src);
 }; // class NullPointerException
 
 /** Thrown to indicate that a method has been passed
@@ -78,8 +77,6 @@ class LOG4CXX_EXPORT IllegalArgumentException : public RuntimeException
 {
 	public:
 		IllegalArgumentException(const LogString& msg);
-		IllegalArgumentException(const IllegalArgumentException&);
-		IllegalArgumentException& operator=(const IllegalArgumentException&);
 }; // class IllegalArgumentException
 
 /** Signals that an I/O exception of some sort has occurred. This class
@@ -92,18 +89,29 @@ class LOG4CXX_EXPORT IOException : public Exception
 		IOException();
 		IOException(log4cxx_status_t stat);
 		IOException(const LogString& msg);
-		IOException(const IOException& src);
-		IOException& operator=(const IOException&);
+		IOException(const char* msg);
+		IOException(const LogString& type, log4cxx_status_t stat);
+#if !LOG4CXX_LOGCHAR_IS_UTF8
+		IOException(const char* msg, log4cxx_status_t stat);
+#endif
 	private:
 		static LogString formatMessage(log4cxx_status_t stat);
+};
+
+class LOG4CXX_EXPORT SubProcessFailure : public Exception
+{
+	public:
+		SubProcessFailure(const LogString& processName, int exitCode, int exitWhy);
+#if !LOG4CXX_LOGCHAR_IS_UTF8
+		SubProcessFailure(const char* processName, int exitCode, int exitWhy);
+#endif
+		static LogString makeMessage(const LogString& processName, int exitCode, int exitWhy);
 };
 
 class LOG4CXX_EXPORT MissingResourceException : public Exception
 {
 	public:
 		MissingResourceException(const LogString& key);
-		MissingResourceException(const MissingResourceException& src);
-		MissingResourceException& operator=(const MissingResourceException&);
 	private:
 		static LogString formatMessage(const LogString& key);
 };
@@ -112,53 +120,8 @@ class LOG4CXX_EXPORT PoolException : public Exception
 {
 	public:
 		PoolException(log4cxx_status_t stat);
-		PoolException(const PoolException& src);
-		PoolException& operator=(const PoolException&);
 	private:
 		static LogString formatMessage(log4cxx_status_t stat);
-};
-
-
-class LOG4CXX_EXPORT InterruptedException : public Exception
-{
-	public:
-		InterruptedException();
-		InterruptedException(log4cxx_status_t stat);
-		InterruptedException(const InterruptedException& src);
-		InterruptedException& operator=(const InterruptedException&);
-	private:
-		static LogString formatMessage(log4cxx_status_t stat);
-};
-
-class LOG4CXX_EXPORT ThreadException
-	: public Exception
-{
-	public:
-		ThreadException(log4cxx_status_t stat);
-		ThreadException(const LogString& msg);
-		ThreadException(const ThreadException& src);
-		ThreadException& operator=(const ThreadException&);
-	private:
-		static LogString formatMessage(log4cxx_status_t stat);
-};
-
-class LOG4CXX_EXPORT TranscoderException : public Exception
-{
-	public:
-		TranscoderException(log4cxx_status_t stat);
-		TranscoderException(const TranscoderException& src);
-		TranscoderException& operator=(const TranscoderException&);
-	private:
-		static LogString formatMessage(log4cxx_status_t stat);
-};
-
-class LOG4CXX_EXPORT IllegalMonitorStateException
-	: public Exception
-{
-	public:
-		IllegalMonitorStateException(const LogString& msg);
-		IllegalMonitorStateException(const IllegalMonitorStateException& msg);
-		IllegalMonitorStateException& operator=(const IllegalMonitorStateException& msg);
 };
 
 /**
@@ -170,8 +133,6 @@ class LOG4CXX_EXPORT InstantiationException : public Exception
 {
 	public:
 		InstantiationException(const LogString& msg);
-		InstantiationException(const InstantiationException& msg);
-		InstantiationException& operator=(const InstantiationException& msg);
 };
 
 /**
@@ -183,27 +144,21 @@ class LOG4CXX_EXPORT ClassNotFoundException : public Exception
 {
 	public:
 		ClassNotFoundException(const LogString& className);
-		ClassNotFoundException(const ClassNotFoundException& msg);
-		ClassNotFoundException& operator=(const ClassNotFoundException& msg);
 	private:
 		static LogString formatMessage(const LogString& className);
 };
 
 
-class NoSuchElementException : public Exception
+class LOG4CXX_EXPORT NoSuchElementException : public Exception
 {
 	public:
 		NoSuchElementException();
-		NoSuchElementException(const NoSuchElementException&);
-		NoSuchElementException& operator=(const NoSuchElementException&);
 };
 
-class IllegalStateException : public Exception
+class LOG4CXX_EXPORT IllegalStateException : public Exception
 {
 	public:
 		IllegalStateException();
-		IllegalStateException(const IllegalStateException&);
-		IllegalStateException& operator=(const IllegalStateException&);
 };
 
 /** Thrown to indicate that there is an error in the underlying
@@ -214,8 +169,6 @@ class LOG4CXX_EXPORT SocketException : public IOException
 	public:
 		SocketException(const LogString& msg);
 		SocketException(log4cxx_status_t status);
-		SocketException(const SocketException&);
-		SocketException& operator=(const SocketException&);
 };
 
 /** Signals that an error occurred while attempting to connect a socket
@@ -225,17 +178,14 @@ remotely (e.g., no process is listening on the remote address/port).
 class LOG4CXX_EXPORT ConnectException : public SocketException
 {
 	public:
+		ConnectException(const LogString& msg);
 		ConnectException(log4cxx_status_t status);
-		ConnectException(const ConnectException& src);
-		ConnectException& operator=(const ConnectException&);
 };
 
 class LOG4CXX_EXPORT ClosedChannelException : public SocketException
 {
 	public:
 		ClosedChannelException();
-		ClosedChannelException(const ClosedChannelException& src);
-		ClosedChannelException& operator=(const ClosedChannelException&);
 };
 
 /** Signals that an error occurred while attempting to bind a socket to
@@ -246,8 +196,6 @@ class LOG4CXX_EXPORT BindException : public SocketException
 {
 	public:
 		BindException(log4cxx_status_t status);
-		BindException(const BindException&);
-		BindException& operator=(const BindException&);
 };
 
 /** Signals that an I/O operation has been interrupted. An
@@ -260,8 +208,6 @@ class LOG4CXX_EXPORT InterruptedIOException : public IOException
 {
 	public:
 		InterruptedIOException(const LogString& msg);
-		InterruptedIOException(const InterruptedIOException&);
-		InterruptedIOException& operator=(const InterruptedIOException&);
 };
 
 
@@ -275,8 +221,6 @@ class LOG4CXX_EXPORT SocketTimeoutException : public InterruptedIOException
 {
 	public:
 		SocketTimeoutException();
-		SocketTimeoutException(const SocketTimeoutException&);
-		SocketTimeoutException& operator=(const SocketTimeoutException&);
 };
 
 

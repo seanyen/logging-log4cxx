@@ -18,17 +18,11 @@
 #ifndef _LOG4CXX_STRING_H
 #define _LOG4CXX_STRING_H
 
-#if defined(_MSC_VER)
-	#pragma warning ( push )
-	#pragma warning ( disable: 4231 4251 4275 4786 )
-#endif
-
-
 #include <string>
 #include <log4cxx/log4cxx.h>
 
-#if (LOG4CXX_LOGCHAR_IS_WCHAR + LOG4CXX_LOGCHAR_IS_UTF8 + LOG4CXX_LOGCHAR_IS_UNICHAR)>1
-	#error only one of LOG4CXX_LOGCHAR_IS_WCHAR, LOG4CXX_LOGCHAR_IS_UTF8 or LOG4CXX_LOGCHAR_IS_UNICHAR may be true
+#if (LOG4CXX_LOGCHAR_IS_WCHAR + LOG4CXX_LOGCHAR_IS_UTF8)>1
+	#error only one of LOG4CXX_LOGCHAR_IS_WCHAR or LOG4CXX_LOGCHAR_IS_UTF8 may be true
 #endif
 
 #if LOG4CXX_CFSTRING_API
@@ -37,12 +31,8 @@ extern "C" {
 }
 #endif
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
-
-#if LOG4CXX_LOGCHAR_IS_UNICHAR || LOG4CXX_UNICHAR_API || LOG4CXX_CFSTRING_API
-	typedef unsigned short UniChar;
-#endif
 
 #if LOG4CXX_LOGCHAR_IS_WCHAR
 	typedef wchar_t logchar;
@@ -52,22 +42,15 @@ namespace log4cxx
 #if LOG4CXX_LOGCHAR_IS_UTF8
 	typedef char logchar;
 	#if LOG4CXX_CHARSET_EBCDIC
-		#define LOG4CXX_STR(str) log4cxx::helpers::Transcoder::decode(str)
+		#define LOG4CXX_STR(str) LOG4CXX_NS::helpers::Transcoder::decode(str)
 	#else
 		#define LOG4CXX_STR(str) str
 	#endif
 #endif
 
-#if LOG4CXX_LOGCHAR_IS_UNICHAR
-	typedef UniChar logchar;
-	#define LOG4CXX_STR(str) log4cxx::helpers::Transcoder::decode(str)
-#endif
-
 typedef std::basic_string<logchar> LogString;
 
-
 }
-
 
 #if !defined(LOG4CXX_EOL)
 	#if defined(_WIN32)
@@ -78,12 +61,8 @@ typedef std::basic_string<logchar> LogString;
 #endif
 
 
-#if LOG4CXX_LOGCHAR_IS_UNICHAR || (LOG4CXX_LOGCHAR_IS_UTF8 || LOG4CXX_CHARSET_EBCDIC)
+#if LOG4CXX_LOGCHAR_IS_UTF8 && LOG4CXX_CHARSET_EBCDIC
 	#include <log4cxx/helpers/transcoder.h>
-#endif
-
-#if defined(_MSC_VER)
-	#pragma warning (pop)
 #endif
 
 #endif //_LOG4CXX_STRING_H

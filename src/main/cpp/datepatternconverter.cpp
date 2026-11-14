@@ -15,10 +15,6 @@
  * limitations under the License.
  */
 
-#if defined(_MSC_VER)
-	#pragma warning ( disable: 4231 4251 4275 4786 )
-#endif
-
 #include <log4cxx/logstring.h>
 #include <log4cxx/pattern/datepatternconverter.h>
 #include <log4cxx/spi/loggingevent.h>
@@ -31,20 +27,36 @@
 #include <log4cxx/helpers/exception.h>
 #include <log4cxx/helpers/loglog.h>
 #include <log4cxx/helpers/date.h>
+#include <log4cxx/private/patternconverter_priv.h>
 
-using namespace log4cxx;
-using namespace log4cxx::pattern;
-using namespace log4cxx::spi;
-using namespace log4cxx::helpers;
+using namespace LOG4CXX_NS;
+using namespace LOG4CXX_NS::pattern;
+using namespace LOG4CXX_NS::spi;
+using namespace LOG4CXX_NS::helpers;
+
+struct DatePatternConverter::DatePatternConverterPrivate : public PatternConverterPrivate
+{
+	DatePatternConverterPrivate( const LogString& name, const LogString& style, const DateFormatPtr& _df ):
+		PatternConverterPrivate(name, style),
+		df(_df) {}
+	/**
+	 * Date format.
+	 */
+	LOG4CXX_NS::helpers::DateFormatPtr df;
+};
+
+#define priv static_cast<DatePatternConverterPrivate*>(m_priv.get())
 
 IMPLEMENT_LOG4CXX_OBJECT(DatePatternConverter)
 
 DatePatternConverter::DatePatternConverter(
 	const std::vector<LogString>& options) :
-	LoggingEventPatternConverter(LOG4CXX_STR("Class Name"),
-		LOG4CXX_STR("class name")), df(getDateFormat(options))
+	LoggingEventPatternConverter (std::make_unique<DatePatternConverterPrivate>(LOG4CXX_STR("Class Name"),
+			LOG4CXX_STR("class name"), getDateFormat(options)))
 {
 }
+
+DatePatternConverter::~DatePatternConverter() {}
 
 DateFormatPtr DatePatternConverter::getDateFormat(const OptionsList& options)
 {
@@ -53,7 +65,7 @@ DateFormatPtr DatePatternConverter::getDateFormat(const OptionsList& options)
 
 	if (options.size() == 0)
 	{
-		df = DateFormatPtr(new ISO8601DateFormat());
+		df = std::make_shared<ISO8601DateFormat>();
 	}
 	else
 	{
@@ -63,17 +75,17 @@ DateFormatPtr DatePatternConverter::getDateFormat(const OptionsList& options)
 			StringHelper::equalsIgnoreCase(dateFormatStr,
 				LOG4CXX_STR("ISO8601"), LOG4CXX_STR("iso8601")))
 		{
-			df = DateFormatPtr(new ISO8601DateFormat());
+			df = std::make_shared<ISO8601DateFormat>();
 		}
 		else if (StringHelper::equalsIgnoreCase(dateFormatStr,
 				LOG4CXX_STR("ABSOLUTE"), LOG4CXX_STR("absolute")))
 		{
-			df = DateFormatPtr(new AbsoluteTimeDateFormat());
+			df = std::make_shared<AbsoluteTimeDateFormat>();
 		}
 		else if (StringHelper::equalsIgnoreCase(dateFormatStr,
 				LOG4CXX_STR("DATE"), LOG4CXX_STR("date")))
 		{
-			df = DateFormatPtr(new DateTimeDateFormat());
+			df = std::make_shared<DateTimeDateFormat>();
 		}
 		else
 		{
@@ -81,13 +93,13 @@ DateFormatPtr DatePatternConverter::getDateFormat(const OptionsList& options)
 			{
 				try
 				{
-					df = DateFormatPtr(new SimpleDateFormat(dateFormatStr));
+					df = std::make_shared<SimpleDateFormat>(dateFormatStr);
 					maximumCacheValidity =
 						CachedDateFormat::getMaximumCacheValidity(dateFormatStr);
 				}
-				catch (IllegalArgumentException& e)
+				catch (const std::exception& e)
 				{
-					df = DateFormatPtr(new ISO8601DateFormat());
+					df = std::make_shared<ISO8601DateFormat>();
 					LogLog::warn(((LogString)
 							LOG4CXX_STR("Could not instantiate SimpleDateFormat with pattern "))
 						+ dateFormatStr, e);
@@ -95,15 +107,23 @@ DateFormatPtr DatePatternConverter::getDateFormat(const OptionsList& options)
 			}
 			else
 			{
-				df = DateFormatPtr(new StrftimeDateFormat(dateFormatStr));
+				df = std::make_shared<StrftimeDateFormat>(dateFormatStr);
 			}
 		}
 
 		if (options.size() >= 2)
 		{
-			TimeZonePtr tz(TimeZone::getTimeZone(options[1]));
+			TimeZonePtr tz;
+			try
+			{
+				tz = TimeZone::getTimeZone(options[1]);
+			}
+			catch (const std::exception& e)
+			{
+				LogLog::warn(LOG4CXX_STR("Invalid time zone: ") + options[1], e);
+			}
 
-			if (tz != NULL)
+			if (tz)
 			{
 				df->setTimeZone(tz);
 			}
@@ -112,7 +132,7 @@ DateFormatPtr DatePatternConverter::getDateFormat(const OptionsList& options)
 
 	if (maximumCacheValidity > 0)
 	{
-		df = DateFormatPtr(new CachedDateFormat(df, maximumCacheValidity));
+		df = std::make_shared<CachedDateFormat>(df, maximumCacheValidity);
 	}
 
 	return df;
@@ -121,51 +141,30 @@ DateFormatPtr DatePatternConverter::getDateFormat(const OptionsList& options)
 PatternConverterPtr DatePatternConverter::newInstance(
 	const std::vector<LogString>& options)
 {
-	return PatternConverterPtr(new DatePatternConverter(options));
+	return std::make_shared<DatePatternConverter>(options);
 }
 
-void DatePatternConverter::format(
-	const LoggingEventPtr& event,
-	LogString& toAppendTo,
-	Pool& p) const
+void DatePatternConverter::format( const spi::LoggingEventPtr& event, LogString& toAppendTo ) const
 {
-	df->format(toAppendTo, event->getTimeStamp(), p);
+	priv->df->format(toAppendTo, event->getTimeStamp());
 }
 
 /**
  * {@inheritDoc}
  */
-void DatePatternConverter::format(
-	const ObjectPtr& obj,
-	LogString& toAppendTo,
-	Pool& p) const
+void DatePatternConverter::format( const helpers::ObjectPtr& obj, LogString& toAppendTo ) const
 {
-	DatePtr date = log4cxx::cast<Date>(obj);
-
-	if (date != NULL)
+	if (auto date = LOG4CXX_NS::cast<Date>(obj))
 	{
-		format(date, toAppendTo, p);
+		format(date, toAppendTo);
 	}
-	else
+	else if (auto event = LOG4CXX_NS::cast<LoggingEvent>(obj))
 	{
-		LoggingEventPtr event = log4cxx::cast<LoggingEvent>(obj);
-
-		if (event != NULL)
-		{
-			format(event, toAppendTo, p);
-		}
+		format( event, toAppendTo );
 	}
 }
 
-/**
- * Append formatted date to string buffer.
- * @param date date
- * @param toAppendTo buffer to which formatted date is appended.
- */
-void DatePatternConverter::format(
-	const DatePtr& date,
-	LogString& toAppendTo,
-	Pool& p) const
+void DatePatternConverter::format(const DatePtr& date, LogString& toAppendTo) const
 {
-	df->format(toAppendTo, date->getTime(), p);
+	priv->df->format(toAppendTo, date->getTime());
 }

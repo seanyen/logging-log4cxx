@@ -18,23 +18,14 @@
 #ifndef _LOG4CXX_HELPERS_BYTEARRAYOUTPUTSTREAM_H
 #define _LOG4CXX_HELPERS_BYTEARRAYOUTPUTSTREAM_H
 
-#if defined(_MSC_VER)
-	#pragma warning ( push )
-	#pragma warning ( disable: 4231 4251 4275 4786 )
-#endif
-
-
-
 #include <log4cxx/helpers/outputstream.h>
 #include <vector>
 
-
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 
 namespace helpers
 {
-class Pool;
 
 LOG4CXX_LIST_DEF(ByteList, unsigned char);
 
@@ -44,7 +35,7 @@ LOG4CXX_LIST_DEF(ByteList, unsigned char);
 class LOG4CXX_EXPORT ByteArrayOutputStream : public OutputStream
 {
 	private:
-		ByteList array;
+		LOG4CXX_DECLARE_PRIVATE_MEMBER_PTR(ByteArrayOutputStreamPriv, m_priv)
 
 	public:
 		DECLARE_ABSTRACT_LOG4CXX_OBJECT(ByteArrayOutputStream)
@@ -56,9 +47,12 @@ class LOG4CXX_EXPORT ByteArrayOutputStream : public OutputStream
 		ByteArrayOutputStream();
 		virtual ~ByteArrayOutputStream();
 
-		virtual void close(Pool& p);
-		virtual void flush(Pool& p);
-		virtual void write(ByteBuffer& buf, Pool& p);
+		using OutputStream::close;
+		void close(  ) override;
+		using OutputStream::flush;
+		void flush(  ) override;
+		using OutputStream::write;
+		void write( ByteBuffer& buf ) override;
 		ByteList toByteArray() const;
 
 	private:
@@ -70,10 +64,5 @@ LOG4CXX_PTR_DEF(ByteArrayOutputStream);
 } // namespace helpers
 
 }  //namespace log4cxx
-
-#if defined(_MSC_VER)
-	#pragma warning ( pop )
-#endif
-
 
 #endif //_LOG4CXX_HELPERS_BYTEARRAYOUTPUTSTREAM_H

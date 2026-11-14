@@ -19,7 +19,9 @@
 
 #include <QString>
 
-namespace log4cxx
+#include "log4cxx/log4cxx.h"
+
+namespace LOG4CXX_NS
 {
 namespace qt
 {
@@ -34,6 +36,7 @@ namespace qt
  * Note that similar to Qt, upon receipt of a fatal message this calls
  * std::abort().
  */
+LOG4CXX_EXPORT
 void messageHandler(QtMsgType type, const QMessageLogContext& context, const QString& message);
 
 } /* namespace qt */

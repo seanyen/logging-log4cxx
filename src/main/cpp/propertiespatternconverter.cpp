@@ -15,28 +15,39 @@
  * limitations under the License.
  */
 
-#if defined(_MSC_VER)
-	#pragma warning ( disable: 4231 4251 4275 4786 )
-#endif
-
 #include <log4cxx/logstring.h>
 #include <log4cxx/pattern/propertiespatternconverter.h>
 #include <log4cxx/spi/loggingevent.h>
 #include <log4cxx/spi/location/locationinfo.h>
+#include <log4cxx/private/patternconverter_priv.h>
 
 #include <iterator>
 
-using namespace log4cxx;
-using namespace log4cxx::pattern;
-using namespace log4cxx::spi;
-using namespace log4cxx::helpers;
+using namespace LOG4CXX_NS;
+using namespace LOG4CXX_NS::pattern;
+using namespace LOG4CXX_NS::spi;
+using namespace LOG4CXX_NS::helpers;
+
+#define priv static_cast<PropertiesPatternConverterPrivate*>(m_priv.get())
+
+struct PropertiesPatternConverter::PropertiesPatternConverterPrivate : public PatternConverterPrivate
+{
+	PropertiesPatternConverterPrivate( const LogString& name, const LogString& style, const LogString& propertyName ) :
+		PatternConverterPrivate( name, style ),
+		option(propertyName) {}
+
+	/**
+	 * Name of property to output.
+	 */
+	const LogString option;
+};
 
 IMPLEMENT_LOG4CXX_OBJECT(PropertiesPatternConverter)
 
 PropertiesPatternConverter::PropertiesPatternConverter(const LogString& name1,
 	const LogString& propertyName) :
-	LoggingEventPatternConverter(name1, LOG4CXX_STR("property")),
-	option(propertyName)
+	LoggingEventPatternConverter(
+		std::make_unique<PropertiesPatternConverterPrivate>(name1, LOG4CXX_STR("property"), propertyName))
 {
 }
 
@@ -45,38 +56,28 @@ PatternConverterPtr PropertiesPatternConverter::newInstance(
 {
 	if (options.size() == 0)
 	{
-		static PatternConverterPtr def(new PropertiesPatternConverter(
-				LOG4CXX_STR("Properties"), LOG4CXX_STR("")));
-		return def;
+		return std::make_shared<PropertiesPatternConverter>(
+				LOG4CXX_STR("Properties"), LOG4CXX_STR(""));
 	}
 
 	LogString converterName(LOG4CXX_STR("Property{"));
 	converterName.append(options[0]);
 	converterName.append(LOG4CXX_STR("}"));
-	PatternConverterPtr converter(new PropertiesPatternConverter(
-			converterName, options[0]));
-	return converter;
+	return std::make_shared<PropertiesPatternConverter>(converterName, options[0]);
 }
 
-void PropertiesPatternConverter::format(
-	const LoggingEventPtr& event,
-	LogString& toAppendTo,
-	Pool& /* p */) const
+void PropertiesPatternConverter::format( const spi::LoggingEventPtr& event, LogString& toAppendTo ) const
 {
-	if (option.length() == 0)
+	if (priv->option.length() == 0)
 	{
 		toAppendTo.append(1, (logchar) 0x7B /* '{' */);
 
-		LoggingEvent::KeySet keySet(event->getMDCKeySet());
-
-		for (LoggingEvent::KeySet::const_iterator iter = keySet.begin();
-			iter != keySet.end();
-			iter++)
+		for (auto const& item : event->getMDCKeySet())
 		{
 			toAppendTo.append(1, (logchar) 0x7B /* '{' */);
-			toAppendTo.append(*iter);
+			toAppendTo.append(item);
 			toAppendTo.append(1, (logchar) 0x2C /* ',' */);
-			event->getMDC(*iter, toAppendTo);
+			event->getMDC(item, toAppendTo);
 			toAppendTo.append(1, (logchar) 0x7D /* '}' */);
 		}
 
@@ -85,7 +86,7 @@ void PropertiesPatternConverter::format(
 	}
 	else
 	{
-		event->getMDC(option, toAppendTo);
+		event->getMDC(priv->option, toAppendTo);
 	}
 }
 

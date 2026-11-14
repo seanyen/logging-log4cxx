@@ -1,0 +1,116 @@
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+name: log4cxx-osx
+
+on: [push, pull_request]
+
+jobs:
+  job:
+    name: ${{ matrix.os }}-${{ matrix.cxx }}-build-and-test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        name: [osx-15-clang, osx-26-clang, osx-g++]
+        include:
+          - name: osx-15-clang
+            os: macos-15
+            cxx: clang++
+            odbc: ON
+            qt: ON
+            multiprocess: ON
+            cfstring: ON
+            next_abi: OFF
+            exitevents: OFF
+          - name: osx-26-clang
+            os: macos-26
+            cxx: clang++
+            odbc: ON
+            qt: ON
+            multiprocess: OFF
+            cfstring: ON
+            next_abi: ON
+            exitevents: ON
+          - name: osx-g++
+            os: macos-latest
+            cxx: g++-15
+            odbc: OFF
+            qt: OFF
+            multiprocess: OFF
+            cfstring: ON
+            next_abi: OFF
+            exitevents: OFF
+
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        persist-credentials: false # do not persist auth token in the local git config
+        path: main
+
+    - name: 'Configure Dependencies'
+      run: |
+        brew install apr-util
+        if [ ${{ matrix.odbc }} == ON ]; then brew install unixodbc; fi
+        if [ ${{ matrix.qt }} == ON ]; then brew install qt; fi
+        if [ ${{ matrix.cxx }} == "g++-14" -a $(cmake --version | head -1 | awk '{split($3, a, "."); print a[1]}') -lt 4 ]
+        then
+          brew uninstall cmake
+          brew install cmake ninja
+        fi
+
+    - name: 'configure and build'
+      run: |
+        cd main
+        mkdir build
+        cd build
+        cmake \
+          -DCMAKE_CXX_COMPILER=${{ matrix.cxx }} \
+          -DLOG4CXX_TEST_ONLY_BUILD=1 \
+          -DLOG4CXX_ENABLE_ODBC=${{ matrix.odbc }} \
+          -DLOG4CXX_MULTIPROCESS_ROLLING_FILE_APPENDER=${{ matrix.multiprocess }} \
+          -DLOG4CXX_CFSTRING=${{ matrix.cfstring }} \
+          -DLOG4CXX_EVENTS_AT_EXIT=${{ matrix.exitevents }} \
+          -DLOG4CXX_BUILD_NEXT_ABI=${{ matrix.next_abi }} \
+          -DCMAKE_BUILD_TYPE=Debug \
+          ..
+        cmake --build .
+
+    - name: run unit tests
+      id: run_tests
+      timeout-minutes: 10
+      run: |
+        cd main
+        cd build
+        ctest -C Debug --output-on-failure || { echo "Test crashed or failed, waiting for crash reporter..."; sleep 5; exit 1; }
+        if [ -n "${{ matrix.test_until_fail }}" ]; then
+          runNo=1
+          while ctest -C Debug --output-on-failure -R ${{ matrix.test_until_fail }} ; do
+            runNo=`expr $runNo + 1`
+          done
+          echo "${{ matrix.test_until_fail }} run $runNo failed"
+          echo "Test crashed or failed, waiting for crash reporter..."
+          sleep 5
+          exit 1
+        fi
+
+    - name: Upload Crash Logs on Failure
+      if: always() && steps.run_tests.outcome == 'failure'
+      uses: actions/upload-artifact@v4
+      with:
+        name: macos-crash-reports
+        path: |
+          ~/Library/Logs/DiagnosticReports/*.ips
+          /Library/Logs/DiagnosticReports/*.ips
+        if-no-files-found: warn

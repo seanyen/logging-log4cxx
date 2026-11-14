@@ -15,17 +15,12 @@
  * limitations under the License.
  */
 
-#if defined(_MSC_VER)
-	#pragma warning ( disable: 4231 4251 4275 4786 )
-#endif
-
-
 #include <log4cxx/ndc.h>
 #include <log4cxx/helpers/transcoder.h>
 #include <log4cxx/helpers/threadspecificdata.h>
 
-using namespace log4cxx;
-using namespace log4cxx::helpers;
+using namespace LOG4CXX_NS;
+using namespace LOG4CXX_NS::helpers;
 
 NDC::NDC(const std::string& message)
 {
@@ -38,12 +33,12 @@ NDC::~NDC()
 }
 
 
-LogString& NDC::getMessage(NDC::DiagnosticContext& ctx)
+const LogString& NDC::getMessage(const DiagnosticContext& ctx)
 {
 	return ctx.first;
 }
 
-LogString& NDC::getFullMessage(NDC::DiagnosticContext& ctx)
+const LogString& NDC::getFullMessage(const DiagnosticContext& ctx)
 {
 	return ctx.second;
 }
@@ -305,61 +300,6 @@ bool NDC::peek(std::wstring& dst)
 #endif
 
 
-#if LOG4CXX_UNICHAR_API
-NDC::NDC(const std::basic_string<UniChar>& message)
-{
-	push(message);
-}
-
-void NDC::push(const std::basic_string<UniChar>& message)
-{
-	LOG4CXX_DECODE_UNICHAR(msg, message);
-	pushLS(msg);
-}
-
-bool NDC::pop(std::basic_string<UniChar>& dst)
-{
-	ThreadSpecificData* data = ThreadSpecificData::getCurrentData();
-
-	if (data != 0)
-	{
-		Stack& stack = data->getStack();
-
-		if (!stack.empty())
-		{
-			Transcoder::encode(stack.top().message, dst);
-			stack.pop();
-			data->recycle();
-			return true;
-		}
-
-		data->recycle();
-	}
-
-	return false;
-}
-
-bool NDC::peek(std::basic_string<UniChar>& dst)
-{
-	ThreadSpecificData* data = ThreadSpecificData::getCurrentData();
-
-	if (data != 0)
-	{
-		Stack& stack = data->getStack();
-
-		if (!stack.empty())
-		{
-			Transcoder::encode(stack.top().message, dst);
-			return true;
-		}
-
-		data->recycle();
-	}
-
-	return false;
-}
-
-#endif
 
 
 #if LOG4CXX_CFSTRING_API

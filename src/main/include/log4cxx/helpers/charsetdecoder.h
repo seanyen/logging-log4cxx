@@ -20,14 +20,14 @@
 
 #include <log4cxx/helpers/object.h>
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 namespace helpers
 {
 class CharsetDecoder;
 LOG4CXX_PTR_DEF(CharsetDecoder);
 class ByteBuffer;
-
+struct ByteBufferPriv;
 
 /**
 *   An abstract engine to transform a sequences of bytes in a specific charset
@@ -77,14 +77,24 @@ class LOG4CXX_EXPORT CharsetDecoder : public Object
 
 
 		/**
-		 *  Decodes as many bytes as possible from the given
-		 *   input buffer, writing the results to the given output string.
-		 *  @param in input buffer.
-		 *  @param out output string.
-		 *  @return APR_SUCCESS if not encoding errors were found.
+		 *  Decodes as many bytes as possible from \c in,
+		 *  appending the result onto \c out.
+		 *  @param in the bytes to decode.
+		 *  @param out the string onto which characters are appended.
+		 *  @return APR_SUCCESS if no encoding errors were found.
 		 */
-		virtual log4cxx_status_t decode(ByteBuffer& in,
-			LogString& out) = 0;
+		virtual log4cxx_status_t decode(ByteBuffer& in, LogString& out) = 0;
+
+
+		/**
+		 *  Decodes up to \c maxByteCount bytes from \c in,
+		 *  appending the result onto \c out.
+		 *  @param in a null terminated string.
+		 *  @param maxByteCount the limit on the size of \c in.
+		 *  @param out the string onto which characters are appended.
+		 *  @return APR_SUCCESS if no encoding errors were found.
+		 */
+		log4cxx_status_t decode(const char* in, size_t maxByteCount, LogString& out);
 
 		/**
 		 *  Determins if status value indicates an invalid byte sequence.
@@ -93,6 +103,13 @@ class LOG4CXX_EXPORT CharsetDecoder : public Object
 		{
 			return (stat != 0);
 		}
+
+		/**
+		 *  Increment the \c buf cursor position past the next UTF8 code point in \c buf.
+		 *  @param buf the bytes to decode.
+		 *  @return the code point value, if successful, otherwise 0xFFFF. The \c buf cursor position is only incremented if successful.
+		 */
+		static unsigned int getUTF8CodePoint(ByteBufferPriv& buf);
 
 	private:
 		/**

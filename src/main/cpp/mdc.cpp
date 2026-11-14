@@ -24,8 +24,8 @@
 #endif
 
 
-using namespace log4cxx;
-using namespace log4cxx::helpers;
+using namespace LOG4CXX_NS;
+using namespace LOG4CXX_NS::helpers;
 
 MDC::MDC(const std::string& key1, const std::string& value) : key()
 {
@@ -182,50 +182,6 @@ std::wstring MDC::remove(const std::wstring& key)
 }
 #endif
 
-#if LOG4CXX_UNICHAR_API
-MDC::MDC(const std::basic_string<UniChar>& key1, const std::basic_string<UniChar>& value)
-{
-	Transcoder::decode(key1, key);
-	LOG4CXX_DECODE_UNICHAR(v, value);
-	putLS(key, v);
-}
-
-std::basic_string<log4cxx::UniChar> MDC::get(const std::basic_string<log4cxx::UniChar>& key)
-{
-	LOG4CXX_DECODE_UNICHAR(lkey, key);
-	LogString lvalue;
-
-	if (get(lkey, lvalue))
-	{
-		LOG4CXX_ENCODE_UNICHAR(value, lvalue);
-		return value;
-	}
-
-	return std::basic_string<UniChar>();
-}
-
-void MDC::put(const std::basic_string<UniChar>& key, const std::basic_string<log4cxx::UniChar>& value)
-{
-	LOG4CXX_DECODE_UNICHAR(lkey, key);
-	LOG4CXX_DECODE_UNICHAR(lvalue, value);
-	putLS(lkey, lvalue);
-}
-
-
-std::basic_string<log4cxx::UniChar> MDC::remove(const std::basic_string<log4cxx::UniChar>& key)
-{
-	LOG4CXX_DECODE_UNICHAR(lkey, key);
-	LogString lvalue;
-
-	if (remove(lkey, lvalue))
-	{
-		LOG4CXX_ENCODE_UNICHAR(value, lvalue);
-		return value;
-	}
-
-	return std::basic_string<UniChar>();
-}
-#endif
 
 #if LOG4CXX_CFSTRING_API
 

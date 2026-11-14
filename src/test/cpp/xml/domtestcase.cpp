@@ -17,6 +17,7 @@
 
 #include <log4cxx/logger.h>
 #include <log4cxx/xml/domconfigurator.h>
+#include <log4cxx/defaultconfigurator.h>
 #include "../logunit.h"
 #include "../util/compare.h"
 #include "xlevel.h"
@@ -31,6 +32,8 @@
 #include <apr_file_io.h>
 #include "../testchar.h"
 #include "log4cxx/helpers/loglog.h"
+#include <log4cxx/helpers/filesystempath.h>
+#include "log4cxx/helpers/pool.h"
 
 using namespace log4cxx;
 using namespace log4cxx::helpers;
@@ -53,39 +56,50 @@ LOGUNIT_CLASS(DOMTestCase)
 #endif
 	LOGUNIT_TEST(test3);
 	LOGUNIT_TEST(test4);
+	LOGUNIT_TEST(recursiveAppenderRef);
+	LOGUNIT_TEST(invalidAppender);
+	LOGUNIT_TEST(invalidLevel);
+	LOGUNIT_TEST(testAutoFallback);
 	LOGUNIT_TEST_SUITE_END();
 
 	LoggerPtr root;
 	LoggerPtr logger;
-
-	static const File TEMP_A1;
-	static const File TEMP_A2;
-	static const File FILTERED_A1;
-	static const File FILTERED_A2;
-	static const File TEMP_A1_2;
-	static const File TEMP_A2_2;
-	static const File FILTERED_A1_2;
-	static const File FILTERED_A2_2;
+	LogString output_dir;
 
 public:
 	void setUp()
 	{
+		LogLog::setInternalDebugging(true);
+#if !LOG4CXX_HAS_FILESYSTEM_PATH
+		spi::Configurator::properties().setProperty(LOG4CXX_STR("PROGRAM_FILE_PATH.PARENT_PATH"), LOG4CXX_STR("output"));
+#endif
+		output_dir = spi::Configurator::properties().getProperty(LOG4CXX_STR("PROGRAM_FILE_PATH.PARENT_PATH"));
+
 		root = Logger::getRootLogger();
 		logger = Logger::getLogger(LOG4CXX_TEST_STR("org.apache.log4j.xml.DOMTestCase"));
 	}
 
 	void tearDown()
 	{
-		log4cxx::spi::LoggerRepositoryPtr rep = root->getLoggerRepository().lock();
-		if (rep) {
+		auto rep = root->getLoggerRepository();
+
+		if (rep)
+		{
 			rep->resetConfiguration();
 		}
 	}
 
 	void test1()
 	{
-		LogLog::setInternalDebugging(true);
-		DOMConfigurator::configure(LOG4CXX_TEST_STR("input/xml/DOMTestCase1.xml"));
+		auto status = DOMConfigurator::configure(LOG4CXX_TEST_STR("input/xml/DOMTestCase1.xml"));
+		LOGUNIT_ASSERT_EQUAL(status, spi::ConfigurationStatus::Configured);
+
+		// Check that ${PROGRAM_FILE_PATH.PARENT_PATH} is expanded
+		auto fa = LOG4CXX_NS::cast<FileAppender>(root->getAppender(LOG4CXX_STR("A1")));
+		LOGUNIT_ASSERT(fa);
+		File logFile{ fa->getFile() };
+		LOGUNIT_ASSERT(!output_dir.empty());
+		LOGUNIT_ASSERT_EQUAL(output_dir, logFile.getParent());
 		common();
 
 		ControlFilter cf1;
@@ -105,12 +119,17 @@ public:
 		filters2.push_back(&threadFilter);
 		filters2.push_back(&iso8601Filter);
 
+		const File TEMP_A1{ output_dir + LOG4CXX_STR("/temp.A1") };
+		const File FILTERED_A1{ output_dir + LOG4CXX_STR("/filtered.A1") };
+		const File TEMP_A2{ output_dir + LOG4CXX_STR("/temp.A2") };
+		const File FILTERED_A2{ output_dir + LOG4CXX_STR("/filtered.A2") };
+
 		try
 		{
 			Transformer::transform(TEMP_A1, FILTERED_A1, filters1);
 			Transformer::transform(TEMP_A2, FILTERED_A2, filters2);
 		}
-		catch (UnexpectedFormatException& e)
+		catch (const UnexpectedFormatException& e)
 		{
 			std::cout << "UnexpectedFormatException :" << e.what() << std::endl;
 			throw;
@@ -118,9 +137,7 @@ public:
 
 		const File witness1(LOG4CXX_TEST_STR("witness/dom.A1.1"));
 		const File witness2(LOG4CXX_TEST_STR("witness/dom.A2.1"));
-		// TODO: A1 doesn't contain duplicate entries
-		//
-		// LOGUNIT_ASSERT(Compare::compare(FILTERED_A1, witness1));
+		LOGUNIT_ASSERT(Compare::compare(FILTERED_A1, witness1));
 		LOGUNIT_ASSERT(Compare::compare(FILTERED_A2, witness2));
 	}
 
@@ -129,7 +146,8 @@ public:
 	//
 	void test2()
 	{
-		DOMConfigurator::configure(LOG4CXX_TEST_STR("input\\xml\\DOMTestCase2.xml"));
+		auto status = DOMConfigurator::configure(LOG4CXX_TEST_STR("input\\xml\\DOMTestCase2.xml"));
+		LOGUNIT_ASSERT_EQUAL(status, spi::ConfigurationStatus::Configured);
 		common();
 
 		ThreadFilter threadFilter;
@@ -141,23 +159,23 @@ public:
 		filters2.push_back(&threadFilter);
 		filters2.push_back(&iso8601Filter);
 
+		const File TEMP_A1_2{ output_dir + LOG4CXX_STR("/temp.A1.2") };
+		const File TEMP_A2_2{ output_dir + LOG4CXX_STR("/temp.A2.2") };
+		const File FILTERED_A1_2{ output_dir + LOG4CXX_STR("/filtered.A1.2") };
+		const File FILTERED_A2_2{ output_dir + LOG4CXX_STR("/filtered.A2.2") };
 		try
 		{
 			Transformer::transform(TEMP_A1_2, FILTERED_A1_2, filters1);
 			Transformer::transform(TEMP_A2_2, FILTERED_A2_2, filters2);
 		}
-		catch (UnexpectedFormatException& e)
+		catch (const UnexpectedFormatException& e)
 		{
 			std::cout << "UnexpectedFormatException :" << e.what() << std::endl;
 			throw;
 		}
 
 		const File witness1(LOG4CXX_TEST_STR("witness/dom.A1.2"));
-		const File witness2(LOG4CXX_TEST_STR("witness/dom.A2.2"));
-		// TODO: A1 doesn't contain duplicate entries
-		//
-		// LOGUNIT_ASSERT(Compare::compare(FILTERED_A1, witness1));
-		LOGUNIT_ASSERT(Compare::compare(FILTERED_A2, witness2));
+		LOGUNIT_ASSERT(Compare::compare(FILTERED_A1_2, witness1));
 	}
 
 
@@ -187,54 +205,85 @@ public:
 
 	/**
 	 * Creates a output file that ends with a superscript 3.
-	 * Output file is checked by build.xml after completion.
 	 */
 	void test3()
 	{
-		DOMConfigurator::configure(LOG4CXX_TEST_STR("input/xml/DOMTestCase3.xml"));
+		auto status = DOMConfigurator::configure(LOG4CXX_TEST_STR("input/xml/DOMTestCase3.xml"));
+		LOGUNIT_ASSERT_EQUAL(status, spi::ConfigurationStatus::Configured);
 		LOG4CXX_INFO(logger, "File name is expected to end with a superscript 3");
 #if LOG4CXX_LOGCHAR_IS_UTF8
 		const logchar fname[] = { 0x6F, 0x75, 0x74, 0x70, 0x75, 0x74, 0x2F, 0x64, 0x6F, 0x6D, static_cast<logchar>(0xC2), static_cast<logchar>(0xB3), 0 };
 #else
 		const logchar fname[] = { 0x6F, 0x75, 0x74, 0x70, 0x75, 0x74, 0x2F, 0x64, 0x6F, 0x6D, static_cast<logchar>(0xB3), 0 };
 #endif
-		File file;
-		file.setPath(fname);
-		Pool p;
-		bool exists = file.exists(p);
+		;
+		bool exists = File(fname).exists();
 		LOGUNIT_ASSERT(exists);
 	}
 
 	/**
 	 * Creates a output file that ends with a ideographic 4.
-	 * Output file is checked by build.xml after completion.
 	 */
 	void test4()
 	{
-		DOMConfigurator::configure(LOG4CXX_TEST_STR("input/xml/DOMTestCase4.xml"));
+		auto status = DOMConfigurator::configure(LOG4CXX_TEST_STR("input/xml/DOMTestCase4.xml"));
+		LOGUNIT_ASSERT_EQUAL(status, spi::ConfigurationStatus::Configured);
 		LOG4CXX_INFO(logger, "File name is expected to end with an ideographic 4");
 #if LOG4CXX_LOGCHAR_IS_UTF8
 		const logchar fname[] = { 0x6F, 0x75, 0x74, 0x70, 0x75, 0x74, 0x2F, 0x64, 0x6F, 0x6D, static_cast<logchar>(0xE3), static_cast<logchar>(0x86), static_cast<logchar>(0x95), 0 };
 #else
 		const logchar fname[] = { 0x6F, 0x75, 0x74, 0x70, 0x75, 0x74, 0x2F, 0x64, 0x6F, 0x6D, static_cast<logchar>(0x3195), 0 };
 #endif
-		File file;
-		file.setPath(fname);
-		Pool p;
-		bool exists = file.exists(p);
+		bool exists = File(fname).exists();
 		LOGUNIT_ASSERT(exists);
 	}
+
+
+	void recursiveAppenderRef()
+	{
+		// Load a bad XML file, make sure that we don't crash in endless recursion
+		auto status = DOMConfigurator::configure(LOG4CXX_TEST_STR("input/xml/DOMConfiguratorRecursive.xml"));
+		LOGUNIT_ASSERT_EQUAL(status, spi::ConfigurationStatus::NotConfigured);
+	}
+
+	void invalidAppender()
+	{
+		// Load an XML file that attempts to use a levelmatchfilter as an appender.
+		// We should not crash when loading this file.
+		auto status = DOMConfigurator::configure(LOG4CXX_TEST_STR("input/xml/DOMInvalidAppender.xml"));
+		LOGUNIT_ASSERT_EQUAL(status, spi::ConfigurationStatus::NotConfigured);
+	}
+  
+	void invalidLevel()
+	{
+		// Load an XML file that attempts to use a filter as a level.
+		// We should not crash when loading this file.
+		auto status = DOMConfigurator::configure(LOG4CXX_TEST_STR("input/xml/DOMInvalidLevel.xml"));
+		LOGUNIT_ASSERT_EQUAL(status, spi::ConfigurationStatus::Configured);
+	}
+
+	void testAutoFallback()
+	{
+		std::vector<LogString> paths
+			{ LOG4CXX_STR("input/xml")
+			};
+		std::vector<LogString> names
+			{ LOG4CXX_STR("DOMTestCase5_bad0.xml")
+			, LOG4CXX_STR("DOMTestCase5_bad1.xml")
+			, LOG4CXX_STR("DOMTestCase5_bad2.xml")
+			, LOG4CXX_STR("DOMTestCase5_bad3.xml")
+			, LOG4CXX_STR("DOMTestCase5_good.xml")
+			};
+		LogString configFile;
+		spi::ConfigurationStatus status;
+		std::tie(status, configFile) = DefaultConfigurator::configureFromFile(paths, names);
+		LOGUNIT_ASSERT_EQUAL(status, spi::ConfigurationStatus::Configured);
+		LOGUNIT_ASSERT(configFile.npos != configFile.find(LOG4CXX_STR("DOMTestCase5_good.xml")));
+		// Prevent "DOMTestCase5_good.xml" use in subsequent default configuration
+		DefaultConfigurator::setConfigurationFileName(LogString());
+	}
+
 };
 
 LOGUNIT_TEST_SUITE_REGISTRATION(DOMTestCase);
-
-const File DOMTestCase::TEMP_A1(LOG4CXX_TEST_STR("output/temp.A1"));
-const File DOMTestCase::TEMP_A2(LOG4CXX_TEST_STR("output/temp.A2"));
-const File DOMTestCase::FILTERED_A1(LOG4CXX_TEST_STR("output/filtered.A1"));
-const File DOMTestCase::FILTERED_A2(LOG4CXX_TEST_STR("output/filtered.A2"));
-
-const File DOMTestCase::TEMP_A1_2(LOG4CXX_TEST_STR("output/temp.A1.2"));
-const File DOMTestCase::TEMP_A2_2(LOG4CXX_TEST_STR("output/temp.A2.2"));
-const File DOMTestCase::FILTERED_A1_2(LOG4CXX_TEST_STR("output/filtered.A1.2"));
-const File DOMTestCase::FILTERED_A2_2(LOG4CXX_TEST_STR("output/filtered.A2.2"));
 

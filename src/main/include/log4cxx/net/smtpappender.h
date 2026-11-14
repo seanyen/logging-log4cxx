@@ -23,53 +23,65 @@
 #include <log4cxx/helpers/cyclicbuffer.h>
 #include <log4cxx/spi/triggeringeventevaluator.h>
 
-#if defined(_MSC_VER)
-	#pragma warning ( push )
-	#pragma warning ( disable: 4251 )
-#endif
-
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 namespace net
 {
 /**
-Send an e-mail when a specific logging event occurs, typically on
-errors or fatal errors.
-<p>The number of logging events delivered in this e-mail depend on
-the value of <b>BufferSize</b> option. The
-<code>SMTPAppender</code> keeps only the last
-<code>BufferSize</code> logging events in its cyclic buffer. This
-keeps memory requirements at a reasonable level while still
-delivering useful application context.
+Send an e-mail when a specific logging event occurs, typically when
+an <b>ERROR</b> level logging event is sent to the appender.
+
+A value must be provided for the following <b>param</b> elements :
+- <b>smtpHost</b> -
+  The URL or IP address of the SMTP server.
+- <b>from</b> -
+  The email address in the <b>from</b> field of the message.
+- one of <b>to</b>, <b>cc</b>, <b>bcc</b> -
+  An email address in the message.
+
+The following <b>param</b> elements  are optional:
+- <b>smtpPort</b> -
+  The TCP/IP port number on the SMTP server.
+  By default port 25 is assumed.
+- <b>subject</b> -
+  Content for the the <b>subject</b> field of the message.
+- <b>smtpUsername</b> -
+  Provided when the SMTP server requests authentication.
+- <b>smtpPassword</b> -
+  Provided when the SMTP server requests authentication.
+- <b>BufferSize</b> -
+  The number of logging events delivered in an e-mail.
+  The <code>SMTPAppender</code> keeps only the last
+  <code>BufferSize</code> logging events in its cyclic buffer. This
+  keeps memory requirements at a reasonable level while still
+  delivering useful application context.
+  By default 512 logging events are kept in its cyclic buffer.
+- <b>evaluatorClass</b> -
+  The registered spi::TriggeringEventEvaluator sub-class
+  that provides the <code>isTriggeringEvent</code> implementation.
+  This attribute can also be set using the <b>triggeringPolicy</b> element.
+  By default an email is sent
+  when the level of the logging event
+  is greater or equal to <b>ERROR</b>.
+
+  An example configuration is:
+  \include async-example.xml
+
 */
 class LOG4CXX_EXPORT SMTPAppender : public AppenderSkeleton
 {
 	private:
-
-	private:
+		struct SMTPPriv;
 		SMTPAppender(const SMTPAppender&);
 		SMTPAppender& operator=(const SMTPAppender&);
 		static bool asciiCheck(const LogString& value, const LogString& label);
+
 		/**
 		This method determines if there is a sense in attempting to append.
 		<p>It checks whether there is a set output target and also if
 		there is a set layout. If these checks fail, then the boolean
 		value <code>false</code> is returned. */
 		bool checkEntryConditions();
-
-		LogString to;
-		LogString cc;
-		LogString bcc;
-		LogString from;
-		LogString subject;
-		LogString smtpHost;
-		LogString smtpUsername;
-		LogString smtpPassword;
-		int smtpPort;
-		int bufferSize; // 512
-		bool locationInfo;
-		helpers::CyclicBuffer cb;
-		spi::TriggeringEventEvaluatorPtr evaluator;
 
 	public:
 		DECLARE_LOG4CXX_OBJECT(SMTPAppender)
@@ -78,40 +90,64 @@ class LOG4CXX_EXPORT SMTPAppender : public AppenderSkeleton
 		LOG4CXX_CAST_ENTRY_CHAIN(AppenderSkeleton)
 		END_LOG4CXX_CAST_MAP()
 
-		SMTPAppender();
 		/**
 		The default constructor will instantiate the appender with a
 		spi::TriggeringEventEvaluator that will trigger on events with
 		level ERROR or higher.*/
-		SMTPAppender(log4cxx::helpers::Pool& p);
+		SMTPAppender();
 
 		/**
 		Use <code>evaluator</code> passed as parameter as the
 		spi::TriggeringEventEvaluator for this net::SMTPAppender.
 		*/
-		SMTPAppender(spi::TriggeringEventEvaluatorPtr evaluator);
+		SMTPAppender(const spi::TriggeringEventEvaluatorPtr& evaluator);
 
 		~SMTPAppender();
 
 		/**
-		 Set options
-		*/
-		virtual void setOption(const LogString& option, const LogString& value);
+		\copybrief AppenderSkeleton::setOption()
 
-		/**
-		Activate the specified options, such as the smtp host, the
-		recipient, from, etc.
+		Supported options | Supported values | Default value |
+		-------------- | ---------------- | --------------- |
+		smtpHost | {any} | - |
+		smtpPort | {int} | 25 |
+		smtpUserName | {any} | - |
+		smtpPassword | {any} | - |
+		from | (\ref asciiCheck "1") | - |
+		to | (\ref asciiCheck "1") | - |
+		cc | (\ref asciiCheck "1") | - |
+		bcc | (\ref asciiCheck "1") | - |
+		subject | {any} | - |
+		buffersize | {int} | 512 |
+		evaluatorClass | (\ref AppenderSkeleton "2") | - |
+		allowPlainTextAuthentication | True,False | False |
+
+		\anchor asciiCheck (1) Only ASCII charaters
+
+		\anchor TriggeringEventEvaluator (2) A registered class deriving from TriggeringEventEvaluator
+
+		\sa AppenderSkeleton::setOption()
 		*/
-		virtual void activateOptions(log4cxx::helpers::Pool& p);
+		void setOption(const LogString& option, const LogString& value) override;
+
+		using spi::OptionHandler::activateOptions;
+		/**
+		\copybrief AppenderSkeleton::activateOptions()
+
+		Will not activate and will log an error message if:<ul>
+		<li>no layout is provided</li>
+		<li>no TriggeringEventEvaluator is provided</li>
+		<li>any required field is missing</li>
+		<li>a non-ascii character is detected where not permitted</li>
+		</ul>.
+		*/
+		void activateOptions(  ) override;
 
 		/**
 		Perform SMTPAppender specific appending actions, mainly adding
 		the event to a cyclic buffer and checking if the event triggers
 		an e-mail to be sent. */
-		virtual void append(const spi::LoggingEventPtr& event, log4cxx::helpers::Pool& p);
-
-
-		virtual void close();
+		void append( const spi::LoggingEventPtr& event ) override;
 
 		/**
 		Returns value of the <b>To</b> option.
@@ -127,18 +163,6 @@ class LOG4CXX_EXPORT SMTPAppender : public AppenderSkeleton
 		Returns value of the <b>bcc</b> option.
 		*/
 		LogString getBcc() const;
-
-
-		/**
-		The <code>SMTPAppender</code> requires a {@link
-		Layout layout}.  */
-		virtual bool requiresLayout() const;
-
-		/**
-		Send the contents of the cyclic buffer as an e-mail message.
-		*/
-		void sendBuffer(log4cxx::helpers::Pool& p);
-
 
 		/**
 		Returns value of the <b>EvaluatorClass</b> option.
@@ -243,23 +267,20 @@ class LOG4CXX_EXPORT SMTPAppender : public AppenderSkeleton
 		/**
 		Returns value of the <b>BufferSize</b> option.
 		*/
-		inline int getBufferSize() const
-		{
-			return bufferSize;
-		}
+		int getBufferSize() const;
 
 
 		/**
 		 *   Gets the current triggering evaluator.
 		 *   @return triggering evaluator.
 		 */
-		log4cxx::spi::TriggeringEventEvaluatorPtr getEvaluator() const;
+		LOG4CXX_NS::spi::TriggeringEventEvaluatorPtr getEvaluator() const;
 
 		/**
 		 *   Sets the triggering evaluator.
 		 *   @param trigger triggering evaluator.
 		 */
-		void setEvaluator(log4cxx::spi::TriggeringEventEvaluatorPtr& trigger);
+		void setEvaluator(const spi::TriggeringEventEvaluatorPtr& trigger);
 
 		/**
 		The <b>EvaluatorClass</b> option takes a string value
@@ -286,9 +307,5 @@ LOG4CXX_PTR_DEF(SMTPAppender);
 
 }  // namespace net
 } // namespace log4cxx
-
-#if defined(_MSC_VER)
-	#pragma warning (pop)
-#endif
 
 #endif // _LOG4CXX_NET_SMTP_H

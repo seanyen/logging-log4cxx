@@ -22,7 +22,7 @@
 #include <log4cxx/helpers/properties.h>
 #include <log4cxx/helpers/inputstream.h>
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 namespace helpers
 {
@@ -47,9 +47,9 @@ class LOG4CXX_EXPORT PropertyResourceBundle : public ResourceBundle
 		@throw IOException if an error occurred when reading from the
 		input stream.
 		*/
-		PropertyResourceBundle(InputStreamPtr inStream);
+		PropertyResourceBundle(const InputStreamPtr& inStream);
 
-		virtual LogString getString(const LogString& key) const;
+		LogString getString(const LogString& key) const override;
 
 	protected:
 		Properties properties;

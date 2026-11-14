@@ -17,6 +17,7 @@
 
 #include "transformer.h"
 #include <log4cxx/file.h>
+#include <log4cxx/helpers/pool.h>
 #include <log4cxx/helpers/transcoder.h>
 #include <apr_thread_proc.h>
 #include <apr_pools.h>
@@ -78,11 +79,11 @@ void Transformer::copyFile(const File& in, const File& out)
 	//
 	apr_file_t* child_out;
 	apr_int32_t flags = APR_FOPEN_WRITE | APR_FOPEN_CREATE | APR_FOPEN_TRUNCATE;
-	apr_status_t stat = out.open(&child_out, flags, APR_OS_DEFAULT, p);
+	apr_status_t stat = apr_file_open(&child_out, out.getAPRPath(), flags, APR_OS_DEFAULT, pool);
 	assert(stat == APR_SUCCESS);
 
 	apr_file_t* in_file;
-	stat = in.open(&in_file, APR_FOPEN_READ, APR_OS_DEFAULT, p);
+	stat = apr_file_open(&in_file, in.getAPRPath(), APR_FOPEN_READ, APR_OS_DEFAULT, pool);
 	assert(stat == APR_SUCCESS);
 	apr_size_t bufsize = 32000;
 	void* buf = apr_palloc(pool, bufsize);
@@ -116,14 +117,29 @@ void Transformer::createSedCommandFile(const std::string& regexName,
 
 	std::string tmp;
 
+	auto sedSanitizer = [] (const std::string& in, const std::string& sedSeparator = "Q")
+	{
+		std::string ret = in;
+		std::string replaceTo = "\\" + sedSeparator;
+		size_t pos = 0;
+
+		while((pos = ret.find(sedSeparator, pos)) != std::string::npos)
+		{
+			ret.replace(pos, sedSeparator.length(), replaceTo);
+			pos += replaceTo.length();
+		}
+
+		return ret;
+	};
+
 	for (log4cxx::Filter::PatternList::const_iterator iter = patterns.begin();
 		iter != patterns.end();
 		iter++)
 	{
 		tmp = "sQ";
-		tmp.append(iter->first);
+		tmp.append(sedSanitizer(iter->first));
 		tmp.append(1, 'Q');
-		tmp.append(iter->second);
+		tmp.append(sedSanitizer(iter->second));
 		tmp.append("Qg\n");
 		apr_file_puts(tmp.c_str(), regexFile);
 	}
@@ -195,7 +211,7 @@ void Transformer::transform(const File& in, const File& out,
 
 		//
 		//    specify the input file
-		args[i++] = Transcoder::encode(in.getPath(), p);
+		args[i++] = in.getAPRPath();
 		args[i] = NULL;
 
 
@@ -206,7 +222,7 @@ void Transformer::transform(const File& in, const File& out,
 		apr_file_t* child_out;
 		apr_int32_t flags = APR_FOPEN_READ | APR_FOPEN_WRITE |
 			APR_FOPEN_CREATE | APR_FOPEN_TRUNCATE;
-		stat = out.open(&child_out, flags, APR_OS_DEFAULT, p);
+		stat = apr_file_open(&child_out, out.getAPRPath(), flags, APR_OS_DEFAULT, pool);
 		assert(stat == APR_SUCCESS);
 
 		stat =  apr_procattr_child_out_set(attr, child_out, NULL);

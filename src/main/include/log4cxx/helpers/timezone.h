@@ -21,14 +21,9 @@
 #include <log4cxx/logstring.h>
 #include <log4cxx/helpers/object.h>
 
-#if defined(_MSC_VER)
-	#pragma warning ( push )
-	#pragma warning ( disable: 4251 )
-#endif
-
 struct apr_time_exp_t;
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 namespace helpers
 {
@@ -65,15 +60,11 @@ class LOG4CXX_EXPORT TimeZone : public helpers::Object
 		TimeZone(const LogString& ID);
 		virtual ~TimeZone();
 
-		const LogString id;
+		LOG4CXX_DECLARE_PRIVATE_MEMBER(LogString, id)
 };
 
 
 }
 }
-
-#if defined(_MSC_VER)
-	#pragma warning (pop)
-#endif
 
 #endif //_LOG4CXX_HELPERS_TIMEZONE_H

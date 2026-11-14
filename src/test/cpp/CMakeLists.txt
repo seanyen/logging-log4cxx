@@ -1,9 +1,37 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#       http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+option(ENABLE_MULTITHREAD_TEST "Enable multithread test.  Note that this test is very unstable,
+    it is mostly designed to ensure that we don't crash immediately if exit is called in a thread"  OFF)
+
+set(TESTING_DEPENDENCY_COMPILE_DEFINITIONS ${LOG4CXX_COMPILE_DEFINITIONS} ${APR_COMPILE_DEFINITIONS} ${APR_UTIL_COMPILE_DEFINITIONS})
+
 # Components required by all tests
 add_library(testingFramework STATIC abts.cpp appenderskeletontestcase.cpp logunit.cpp vectorappender.cpp writerappendertestcase.cpp )
-target_compile_definitions(testingFramework PRIVATE ${LOG4CXX_COMPILE_DEFINITIONS} ${APR_COMPILE_DEFINITIONS} ${APR_UTIL_COMPILE_DEFINITIONS} )
+target_compile_definitions(testingFramework PRIVATE ${TESTING_DEPENDENCY_COMPILE_DEFINITIONS} )
 target_include_directories(testingFramework PRIVATE ${CMAKE_CURRENT_LIST_DIR} $<TARGET_PROPERTY:log4cxx,INCLUDE_DIRECTORIES>)
 add_subdirectory(util)
 target_sources(testingUtilities PRIVATE xml/xlevel.cpp)
+if(ENABLE_FMT_ASYNC AND MSVC)
+    # This flag tells the MSVC compiler to read all source files 
+    # as encoded in UTF-8, which resolves the fmt static_assert.
+    target_compile_options(testingFramework PRIVATE /utf-8)
+    target_compile_options(testingUtilities PRIVATE /utf-8)
+endif()
 
 set( LOG4CXX_TEST_PROGRAM_PATH "" CACHE PATH "Extra path for test programs" )
 set( CMAKE_PROGRAM_PATH "${LOG4CXX_TEST_PROGRAM_PATH};${CMAKE_PROGRAM_PATH}" )
@@ -17,27 +45,49 @@ find_program(GZIP_APP gzip REQUIRED)
 
 # Tests defined in this directory
 set(ALL_LOG4CXX_TESTS
+    autoconfiguretestcase
     asyncappendertestcase
+    asyncappenderracestress
     consoleappendertestcase
+    defaultconfiguratortest
     decodingtest
     encodingtest
     fileappendertest
     filetestcase
+    hexdumptestcase
     hierarchytest
     hierarchythresholdtestcase
     jsonlayouttest
     l7dtestcase
     leveltestcase
+    levelchangetestcase
     loggertestcase
+    loggerappendertests
+    loggerthresholdtests
     mdctestcase
     minimumtestcase
     ndctestcase
+    optionhandlertest
     patternlayouttest
     propertyconfiguratortest
     rollingfileappendertestcase
     streamtestcase
-    multithreadtest
+    locationtest
+    locationdisabledtest
+    terminationtestcase
 )
+if(${ENABLE_FMT_LAYOUT})
+    set(ALL_LOG4CXX_TESTS ${ALL_LOG4CXX_TESTS} fmttest)
+endif()
+if(${ENABLE_MULTITHREAD_TEST})
+    set(ALL_LOG4CXX_TESTS ${ALL_LOG4CXX_TESTS} multithreadtest)
+endif()
+if(${LOG4CXX_EVENTS_AT_EXIT})
+    set(ALL_LOG4CXX_TESTS ${ALL_LOG4CXX_TESTS} eventsatexittest)
+endif()
+if(LOG4CXX_QT_SUPPORT)
+  list(APPEND ALL_LOG4CXX_TESTS qtconfigurationtest)
+endif(LOG4CXX_QT_SUPPORT)
 foreach(fileName IN LISTS ALL_LOG4CXX_TESTS)
     add_executable(${fileName} "${fileName}.cpp")
 endforeach()
@@ -45,8 +95,11 @@ target_sources(rollingfileappendertestcase PRIVATE fileappendertestcase.cpp)
 
 # Tests defined in subdirectories
 add_subdirectory(helpers)
-add_subdirectory(customlogger)
-if(LOG4CXX_HAS_ODBC OR WIN32)
+if(LOG4CXX_DOMCONFIGURATOR_SUPPORT)
+    add_subdirectory(customlogger)
+    add_subdirectory(xml)
+endif()
+if(HAS_ODBC)
     add_subdirectory(db)
 endif()
 add_subdirectory(defaultinit)
@@ -57,64 +110,95 @@ if(WIN32)
 endif()
 add_subdirectory(pattern)
 add_subdirectory(rolling)
-add_subdirectory(spi)
 add_subdirectory(varia)
-add_subdirectory(xml)
+add_subdirectory(throughput)
+add_subdirectory(benchmark)
 
-# Note: we need to include the APR DLLs on our path so that the tests will run.
-# The way that CMake sets the environment is that it actually generates a secondary file,
-# CTestTestfile.cmake, which sets the final properties of the test.
-# However, this results in a secondary quirk to the running of the tests: CMake uses
-# a semicolon to deliminate entries in a list!  Since the Windows PATH is semicolon-delimited
-# as well, CMake uses only the first entry in the list when setting the path.
-# So, we need to do a triple escape on the PATH that we want to set in order for CMake to
-# properly interpret the PATH
 if( WIN32 )
-  get_filename_component(APR_DLL_DIR "${APR_DLL}" DIRECTORY)
-  get_filename_component(APR_UTIL_DLL_DIR "${APR_UTIL_DLL}" DIRECTORY)
-  get_filename_component(EXPAT_LIB_DIR "${EXPAT_LIBRARY}" DIRECTORY)
+  include(win32_target_environment_path)
+  get_target_environment_path(ESCAPED_PATH)
+elseif(CMAKE_BUILD_TYPE)
+  string(TOUPPER ${CMAKE_BUILD_TYPE} UPPER_BUILD_TYPE)
+  if (UPPER_BUILD_TYPE STREQUAL "DEBUG")
+    set(TEST_COMPILE_DEFINITIONS _DEBUG)
+  endif()
+else()
+  set(TEST_COMPILE_DEFINITIONS _DEBUG)
+endif()
+if(LOG4CXX_TEST_ONLY_BUILD)
+  list(APPEND TEST_COMPILE_DEFINITIONS
+      "ENABLE_FAILING_APPENDER_SIMULATION_TESTING=1"
+      "ENABLE_2GB_STRING_TESTING=1"
+      "ENABLE_4000_THREAD_SANITIZER_TESTING=1"
+      "LOGLOG_THRESHOLD=1"
+  )
+endif()
 
-
-  set(EXPAT_DLL_DIR "${EXPAT_LIB_DIR}/../bin")
-  set(LOG4CXX_DLL_DIR "$<SHELL_PATH:$<TARGET_FILE_DIR:log4cxx>>;")
-  set(PATH_FOR_TESTS ${CMAKE_PROGRAM_PATH};${APR_DLL_DIR};${APR_UTIL_DLL_DIR};${LOG4CXX_DLL_DIR};${EXPAT_DLL_DIR}\;)
-  list(REMOVE_DUPLICATES PATH_FOR_TESTS)
-  set(NORMAL_PATH $ENV{PATH})
-  set(ESCAPED_PATH "")
-  foreach( ENTRY ${PATH_FOR_TESTS}${NORMAL_PATH} )
-	  set(ESCAPED_PATH "${ESCAPED_PATH}${ENTRY}\\\;")
-  endforeach()
-endif( WIN32 )
-
+get_filename_component(UNIT_TEST_WORKING_DIR ../resources ABSOLUTE)
+if(LOG4CXX_CFSTRING)
+  set(CFSTR_TESTS filetestcase messagebuffertest leveltestcase streamtestcase transcodertestcase)
+endif()
 foreach(testName IN LISTS ALL_LOG4CXX_TESTS)
-    target_compile_definitions(${testName} PRIVATE ${LOG4CXX_COMPILE_DEFINITIONS} ${APR_COMPILE_DEFINITIONS} ${APR_UTIL_COMPILE_DEFINITIONS} )
+    if (${testName} STREQUAL "qtconfigurationtest")
+        target_include_directories(${testName} PRIVATE $<TARGET_PROPERTY:log4cxx-qt,INCLUDE_DIRECTORIES>)
+        target_compile_definitions(${testName} PRIVATE "QT_NO_KEYWORDS")
+        target_link_libraries(${testName} PRIVATE log4cxx-qt)
+    endif()
+    if (${testName} IN_LIST CFSTR_TESTS)
+      if(APPLE)
+        target_compile_options(${testName} PRIVATE "-fconstant-cfstrings")
+        target_link_libraries(${testName} PRIVATE "-framework CoreFoundation")
+      else()
+        target_link_libraries(${testName} PRIVATE MockCoreFoundation)
+      endif()
+    endif()
+    target_compile_definitions(${testName} PRIVATE ${TEST_COMPILE_DEFINITIONS} ${TESTING_DEPENDENCY_COMPILE_DEFINITIONS} )
     target_include_directories(${testName} PRIVATE ${CMAKE_CURRENT_LIST_DIR} $<TARGET_PROPERTY:log4cxx,INCLUDE_DIRECTORIES>)
-    target_link_libraries(${testName} PRIVATE testingFramework testingUtilities log4cxx ${APR_LIBRARIES} ${APR_SYSTEM_LIBS} Threads::Threads)
+    target_link_libraries(${testName} PRIVATE testingFramework testingUtilities log4cxx ${APR_LIBRARIES} ${APR_SYSTEM_LIBS} Threads::Threads ${ODBC_LIBRARIES} )
+    if(HAS_LIBESMTP)
+      target_link_libraries(${testName} PRIVATE ${ESMTP_LIBRARIES})
+    endif()
+
     add_test(NAME ${testName}
         COMMAND ${testName} -v
-        WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/../resources
+        WORKING_DIRECTORY ${UNIT_TEST_WORKING_DIR}
     )
     set_tests_properties( ${testName} PROPERTIES TIMEOUT 120 )
-
     if(WIN32)
-        if(${testName} STREQUAL socketservertestcase)
-            set_tests_properties(socketservertestcase PROPERTIES
-                ENVIRONMENT "SOCKET_SERVER_PARAMETER_FILE=${START_SOCKET_SERVER_PARAMETER_FILE};PATH=${ESCAPED_PATH}"
+        set_target_properties(${testName} PROPERTIES
+          VS_DEBUGGER_WORKING_DIRECTORY ${UNIT_TEST_WORKING_DIR}
+          VS_DEBUGGER_COMMAND_ARGUMENTS "-v"
+          FOLDER UnitTests
+        )
+        if(${testName} STREQUAL optionconvertertestcase)
+            set_target_properties(${testName} PROPERTIES
+              VS_DEBUGGER_ENVIRONMENT "TOTO=wonderful\nkey1=value1\nkey2=value2\nPATH=${ESCAPED_PATH}"
             )
-        else()
            set_tests_properties(${testName} PROPERTIES
                 ENVIRONMENT "TOTO=wonderful;key1=value1;key2=value2;PATH=${ESCAPED_PATH}"
            )
+        else()
+            set_target_properties(${testName} PROPERTIES
+              VS_DEBUGGER_ENVIRONMENT "PATH=${ESCAPED_PATH}"
+            )
+           set_tests_properties(${testName} PROPERTIES
+                ENVIRONMENT "PATH=${ESCAPED_PATH}"
+           )
+        endif()
+        if(NOT BUILD_SHARED_LIBS)
+            # cmake selects a multi-threaded dynamically-linked runtime library by default
+            # (i.e. MSVC_RUNTIME_LIBRARY target property default value is "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+            # APR static libraries specify the MSVC statically-linked runtime as the default library
+            # Use the MSVC statically-linked runtime to prevent the warning message 'LNK4098: defaultlib 'LIBCMT' conflicts with use of other libs'
+            set_target_properties(${testName} PROPERTIES MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
         endif()
     else()
-        if(${testName} STREQUAL socketservertestcase)
-            set_tests_properties(socketservertestcase PROPERTIES
-                ENVIRONMENT "SOCKET_SERVER_PARAMETER_FILE=${START_SOCKET_SERVER_PARAMETER_FILE}"
-            )
-        else()
-           set_tests_properties(${testName} PROPERTIES
+        if(${testName} STREQUAL optionconvertertestcase)
+            set_tests_properties(optionconvertertestcase PROPERTIES
                 ENVIRONMENT "TOTO=wonderful;key1=value1;key2=value2"
-           )
+            )
         endif()
     endif()
 endforeach()
+
+target_compile_definitions(locationdisabledtest PRIVATE LOG4CXX_DISABLE_LOCATION_INFO)

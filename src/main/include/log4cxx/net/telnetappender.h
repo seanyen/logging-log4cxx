@@ -18,21 +18,10 @@
 #ifndef _LOG4CXX_NET_TELNET_APPENDER_H
 #define _LOG4CXX_NET_TELNET_APPENDER_H
 
-#if defined(_MSC_VER)
-	#pragma warning ( push )
-	#pragma warning ( disable: 4231 4251 4275 4786 )
-#endif
-
-
-
 #include <log4cxx/appenderskeleton.h>
 #include <log4cxx/helpers/socket.h>
-#include <log4cxx/helpers/serversocket.h>
-#include <thread>
-#include <vector>
-#include <log4cxx/helpers/charsetencoder.h>
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 namespace helpers
 {
@@ -40,42 +29,31 @@ class ByteBuffer;
 }
 namespace net
 {
-typedef log4cxx::helpers::SocketPtr Connection;
-LOG4CXX_LIST_DEF(ConnectionList, Connection);
 
 /**
-<p>The TelnetAppender is a log4cxx appender that specializes in
-writing to a read-only socket.  The output is provided in a
-telnet-friendly way so that a log can be monitored over TCP/IP.
-Clients using telnet connect to the socket and receive log data.
-This is handy for remote monitoring, especially when monitoring a
-servlet.
+The TelnetAppender writes log messages to
+clients that connect to the TCP port.
 
-<p>Here is a list of the available configuration options:
+This allows logging output to be monitored using TCP/IP.
+To receive log data, use telnet to connect to the configured port number.
 
-<table border=1>
-<tr>
-<td align=center><b>Name</b></td>
-<td align=center><b>Requirement</b></td>
-<td align=center><b>Description</b></td>
-<td align=center><b>Sample Value</b></td>
-</tr>
+TelnetAppender is most useful as a secondary appender,
+especially when monitoring a servlet remotely.
 
-<tr>
-<td>Port</td>
-<td>optional</td>
-<td>This parameter determines the port to use for announcing log events.  The default port is 23 (telnet).</td>
-<td>5875</td>
-</table>
+If no layout is provided, the log message only is sent to attached client(s).
+
+The \c ReuseAddress option is disabled by default.
+Enable it to be able to connect to this appender
+immediately after the logging process restarts.
+
+See TelnetAppender::setOption() for the available options.
+
 */
 class LOG4CXX_EXPORT TelnetAppender : public AppenderSkeleton
 {
-		class SocketHandler;
-		friend class SocketHandler;
 	private:
 		static const int DEFAULT_PORT;
 		static const int MAX_CONNECTIONS;
-		int port;
 
 	public:
 		DECLARE_LOG4CXX_OBJECT(TelnetAppender)
@@ -88,78 +66,122 @@ class LOG4CXX_EXPORT TelnetAppender : public AppenderSkeleton
 		~TelnetAppender();
 
 		/**
-		This appender requires a layout to format the text to the
-		attached client(s). */
-		virtual bool requiresLayout() const
-		{
-			return true;
-		}
+		The current encoding value.
 
+		\sa setOption
+		 */
 		LogString getEncoding() const;
+		/**
+		Set the encoding to \c value.
+
+		\sa setOption
+		 */
 		void setEncoding(const LogString& value);
 
 
-		/** all of the options have been set, create the socket handler and
-		wait for connections. */
-		void activateOptions(log4cxx::helpers::Pool& p);
+		using AppenderSkeleton::activateOptions;
+		/**
+		\copybrief AppenderSkeleton::activateOptions()
+
+		Create the socket handler and wait for connections.
+		*/
+		void activateOptions(  ) override;
+
 
 		/**
-		Set options
+		\copybrief AppenderSkeleton::setOption()
+
+		Supported options | Supported values | Default value |
+		-------------- | ---------------- | --------------- |
+		Port | {int} | 23 |
+		Hostname | name or numeric address | - |
+		MaxConnections | {int} | 20 |
+		Encoding | C,UTF-8,UTF-16,UTF-16BE,UTF-16LE,646,US-ASCII,ISO646-US,ANSI_X3.4-1968,ISO-8859-1,ISO-LATIN-1 | UTF-8 |
+		ReuseAddress | True,False | False |
+		NonBlocking | True,False | True |
+
+		\sa AppenderSkeleton::setOption()
 		*/
-		virtual void setOption(const LogString& option, const LogString& value);
+		void setOption(const LogString& option, const LogString& value) override;
 
 		/**
-		Returns value of the <b>Port</b> option.
+		The TCP <b>Port</b> number on which to accept connections.
 		*/
-		int getPort() const
-		{
-			return port;
-		}
+		int getPort() const;
 
 		/**
-		The <b>Port</b> option takes a positive integer representing
-		the port where the server is waiting for connections.
+		Use \c newValue as the TCP port number on which to accept connections.
 		*/
-		void setPort(int port1)
-		{
-			this->port = port1;
-		}
+		void setPort(int newValue);
 
+		/**
+		The <b>Hostname</b> on which to accept connections.
+		*/
+		LogString getHostname() const;
 
-		/** shuts down the appender. */
-		void close();
+		/**
+		Use \c newValue as the Hostname on which to accept connections.
+		By default connections are accepted on any network interface device.
+		*/
+		void setHostname(const LogString& newValue);
+
+		/**
+		The number of allowed concurrent connections.
+
+		\sa setOption
+		 */
+		int getMaxConnections() const;
+
+		/**
+		Set the number of allowed concurrent connections to \c newValue.
+
+		\sa setOption
+		 */
+		void setMaxConnections(int newValue);
+
+		/**
+		Use \c newValue for the SO_REUSEADDR option of the socket accepting connections.
+		When set to \c true, a telnet client can connect when the socket is in a TIME_WAIT state,
+		so log message delivery will resume quickly when a terminated process restarts.
+
+		\sa setOption
+		 */
+		void setReuseAddress(bool newValue);
+
+		/**
+		Use \c newValue for the behaviour when the TCP send buffer (on an accepted socket connection) is full.
+
+		When true (the default), the socket connection is closed if the write would block.
+
+		Setting \c newValue to \c false is an explicit opt-out that must only be
+		used when every telnet client is trusted to read promptly: a blocking
+		connection lets a client that stops reading stall the send indefinitely,
+		blocking every thread that logs through this appender.
+
+		\sa setOption
+		*/
+		void setNonBlocking(bool newValue);
 
 	protected:
-		/** Handles a log event.  For this appender, that means writing the
-		message to each connected client.  */
-		virtual void append(const spi::LoggingEventPtr& event, log4cxx::helpers::Pool& p) ;
-
-		//---------------------------------------------------------- SocketHandler:
+		/** Send \c event to each connected client.
+		*/
+		void append( const spi::LoggingEventPtr& event ) override;
 
 	private:
 		//   prevent copy and assignment statements
 		TelnetAppender(const TelnetAppender&);
 		TelnetAppender& operator=(const TelnetAppender&);
 
-		void write(log4cxx::helpers::ByteBuffer&);
-		void writeStatus(const log4cxx::helpers::SocketPtr& socket, const LogString& msg, log4cxx::helpers::Pool& p);
-		ConnectionList connections;
-		LogString encoding;
-		log4cxx::helpers::CharsetEncoderPtr encoder;
-		helpers::ServerSocket* serverSocket;
-		std::thread sh;
-		size_t activeConnections;
+		void write(helpers::ByteBuffer&);
+		void writeStatus(const helpers::SocketPtr& socket, const LogString& msg, helpers::Pool& p);
 		void acceptConnections();
+
+		struct TelnetAppenderPriv;
 }; // class TelnetAppender
 
 LOG4CXX_PTR_DEF(TelnetAppender);
 } // namespace net
 } // namespace log4cxx
-
-
-#if defined(_MSC_VER)
-	#pragma warning ( pop )
-#endif
 
 #endif // _LOG4CXX_NET_TELNET_APPENDER_H
 

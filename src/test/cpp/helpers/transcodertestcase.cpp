@@ -16,9 +16,13 @@
  */
 
 #include <log4cxx/helpers/transcoder.h>
+#include <log4cxx/helpers/bytebuffer.h>
 #include "../insertwide.h"
 #include "../logunit.h"
 
+#if LOG4CXX_CFSTRING_API
+	#include <CoreFoundation/CFString.h>
+#endif
 
 using namespace log4cxx;
 using namespace log4cxx::helpers;
@@ -35,6 +39,9 @@ LOGUNIT_CLASS(TranscoderTestCase)
 #if LOG4CXX_WCHAR_T_API
 	LOGUNIT_TEST(decode4);
 #endif
+#if LOG4CXX_CFSTRING_API
+	LOGUNIT_TEST(decode5);
+#endif
 	LOGUNIT_TEST(decode7);
 	LOGUNIT_TEST(decode8);
 #if LOG4CXX_WCHAR_T_API
@@ -50,16 +57,25 @@ LOGUNIT_CLASS(TranscoderTestCase)
 	LOGUNIT_TEST(encode5);
 #endif
 	LOGUNIT_TEST(encode6);
+#if LOG4CXX_CFSTRING_API
+	LOGUNIT_TEST(encode7);
+#endif
 	LOGUNIT_TEST(testDecodeUTF8_1);
 	LOGUNIT_TEST(testDecodeUTF8_2);
 	LOGUNIT_TEST(testDecodeUTF8_3);
 	LOGUNIT_TEST(testDecodeUTF8_4);
-#if LOG4CXX_UNICHAR_API
-	LOGUNIT_TEST(udecode2);
-	LOGUNIT_TEST(udecode4);
-	LOGUNIT_TEST(uencode1);
-	LOGUNIT_TEST(uencode3);
-	LOGUNIT_TEST(uencode5);
+	LOGUNIT_TEST(testDecodeUTF8_RejectSurrogate);
+	LOGUNIT_TEST(testDecodeUTF8_SurrogateBoundaries);
+	LOGUNIT_TEST(testDecodeUTF8_U0800);
+	LOGUNIT_TEST(testDecodeUTF8_RejectAboveMax);
+	LOGUNIT_TEST(testDecodeUTF8_MaxBoundary);
+	LOGUNIT_TEST(testDecodeUTF8_RejectInvalidLeadByte);
+	LOGUNIT_TEST(testDecodeUTF8_FFFF_KeepsFollowingByte);
+	LOGUNIT_TEST(testEncodeUTF16BE_BMP);
+	LOGUNIT_TEST(testEncodeUTF16BE_Supplementary);
+	LOGUNIT_TEST(testEncodeUTF16LE_Supplementary);
+#if LOG4CXX_WCHAR_T_API || LOG4CXX_LOGCHAR_IS_WCHAR || defined(WIN32) || defined(_WIN32)
+	LOGUNIT_TEST(testEncodeWString_FFFF_KeepsFollowingByte);
 #endif
 #if LOG4CXX_LOGCHAR_IS_UTF8
 	LOGUNIT_TEST(encodeCharsetName1);
@@ -103,6 +119,16 @@ public:
 		LogString decoded(LOG4CXX_STR("foo\n"));
 		Transcoder::decode(nothing, decoded);
 		LOGUNIT_ASSERT_EQUAL((LogString) LOG4CXX_STR("foo\n"), decoded);
+	}
+#endif
+
+#if LOG4CXX_CFSTRING_API
+	void decode5()
+	{
+		LogString nothing;
+		LogString decoded(LOG4CXX_STR("foo\n"));
+		Transcoder::decode(nothing, decoded);
+		LOGUNIT_ASSERT_EQUAL(LOG4CXX_STR("foo\n"), decoded);
 	}
 #endif
 
@@ -165,17 +191,23 @@ public:
 		LOGUNIT_ASSERT_EQUAL(std::wstring(L"Hello"), encoded.substr(BUFSIZE - 3));
 	}
 
+	// Test invalid codepoints
 	void encode3_1()
 	{
-		// Test invalid multibyte string
-		LogString greeting;
-		greeting.push_back( 0xff );
-		std::wstring encoded;
-		Transcoder::encode(greeting, encoded);
+		unsigned int replacementCharacter = Transcoder::LOSSCHAR;
+		std::wstring encodedD800(1, 0xD800);
+		std::wstring::const_iterator iD800 = encodedD800.begin();
+		LOGUNIT_ASSERT_EQUAL(replacementCharacter, Transcoder::getCodePoint(encodedD800, iD800));
 
-		std::wstring expected;
-		expected.push_back( log4cxx::helpers::Transcoder::LOSSCHAR );
-		LOGUNIT_ASSERT_EQUAL(encoded, expected );
+		std::wstring encodedDFFF(1, 0xDFFF);
+		std::wstring::const_iterator iDFFF = encodedDFFF.begin();
+		LOGUNIT_ASSERT_EQUAL(replacementCharacter, Transcoder::getCodePoint(encodedDFFF, iDFFF));
+
+#if defined(__STDC_ISO_10646__)
+		std::wstring encoded110000(1, 0x110000);
+		std::wstring::const_iterator i110000 = encoded110000.begin();
+		LOGUNIT_ASSERT_EQUAL(replacementCharacter, Transcoder::getCodePoint(encoded110000, i110000));
+#endif
 	}
 #endif
 
@@ -215,7 +247,7 @@ public:
 
 	void encode6()
 	{
-#if LOG4CXX_LOGCHAR_IS_WCHAR || LOG4CXX_LOGCHAR_IS_UNICHAR
+#if LOG4CXX_LOGCHAR_IS_WCHAR
 		//   arbitrary, hopefully meaningless, characters from
 		//     Latin, Arabic, Armenian, Bengali, CJK and Cyrillic
 		const logchar greeting[] = { L'A', 0x0605, 0x0530, 0x984, 0x40E3, 0x400, 0 };
@@ -247,6 +279,17 @@ public:
 		Transcoder::encode(decoded, encoded);
 	}
 
+#if LOG4CXX_CFSTRING_API
+	void encode7()
+	{
+		const LogString greeting(LOG4CXX_STR("Hello, World"));
+		CFStringRef encoded = Transcoder::encode(greeting);
+		LogString decoded;
+		Transcoder::decode(encoded, decoded);
+		LOGUNIT_ASSERT_EQUAL(LOG4CXX_STR("Hello, World"), decoded);
+	}
+#endif
+
 	void testDecodeUTF8_1()
 	{
 		std::string src("a");
@@ -257,10 +300,10 @@ public:
 
 	void testDecodeUTF8_2()
 	{
-		std::string src(1, 0x80);
+		std::string src(1, char(0x80));
 		LogString out;
 		Transcoder::decodeUTF8(src, out);
-		LOGUNIT_ASSERT_EQUAL(LogString(1, Transcoder::LOSSCHAR), out);
+		LOGUNIT_ASSERT(Transcoder::hasReplacementCharacter(out));
 	}
 
 	void testDecodeUTF8_3()
@@ -268,7 +311,7 @@ public:
 		std::string src("\xC2");
 		LogString out;
 		Transcoder::decodeUTF8(src, out);
-		LOGUNIT_ASSERT_EQUAL(LogString(1, Transcoder::LOSSCHAR), out);
+		LOGUNIT_ASSERT(Transcoder::hasReplacementCharacter(out));
 	}
 
 	void testDecodeUTF8_4()
@@ -282,66 +325,203 @@ public:
 		LOGUNIT_ASSERT_EQUAL(true, iter == out.end());
 	}
 
-
-#if LOG4CXX_UNICHAR_API
-	void udecode2()
+	/**
+	 * RFC 3629 §3 prohibits UTF-8 encodings of the UTF-16 surrogate halves
+	 * (U+D800..U+DFFF). The three-byte sequences ED A0 80 .. ED BF BF must
+	 * not decode to the corresponding surrogate code points: doing so lets
+	 * lone surrogates enter LogString and be re-emitted by JSON/XML layouts,
+	 * propagating malformed Unicode past the parsing boundary.
+	 */
+	void testDecodeUTF8_RejectSurrogate()
 	{
-		const UniChar greeting[] = { 'H', 'e', 'l', 'l', 'o', ',', ' ', 'W', 'o', 'r', 'l', 'd', 0 };
-		LogString decoded(LOG4CXX_STR("foo\n"));
-		Transcoder::decode(greeting, decoded);
-		LOGUNIT_ASSERT_EQUAL((LogString) LOG4CXX_STR("foo\nHello, World"), decoded);
+		// ED A0 80 would encode U+D800 (the smallest high-surrogate).
+		std::string src("\xED\xA0\x80");
+		LogString out;
+		Transcoder::decodeUTF8(src, out);
+		LOGUNIT_ASSERT(Transcoder::hasReplacementCharacter(out));
 	}
 
-	void udecode4()
+	/**
+	 * U+0800 (SAMARITAN LETTER ALAF) is the smallest code point that
+	 * legitimately requires a three-byte UTF-8 sequence (E0 A0 80).
+	 * The overlong check in the three-byte branch of Transcoder::decode
+	 * previously used `rv <= 0x800` instead of `rv < 0x800`, so this exact
+	 * code point was rejected as if it were an overlong encoding and the
+	 * caller substituted Transcoder::LOSSCHAR. Any UTF-8 input containing
+	 * the bytes E0 A0 80 was therefore silently corrupted on decode.
+	 */
+	void testDecodeUTF8_U0800()
 	{
-		const UniChar nothing[] = { 0 };
-		LogString decoded(LOG4CXX_STR("foo\n"));
-		Transcoder::decode(nothing, decoded);
-		LOGUNIT_ASSERT_EQUAL((LogString) LOG4CXX_STR("foo\n"), decoded);
+		std::string src("\xE0\xA0\x80");
+		LogString out;
+		Transcoder::decodeUTF8(src, out);
+		LOGUNIT_ASSERT(!Transcoder::hasReplacementCharacter(out));
 	}
 
-	void uencode1()
+	/**
+	 * Confirm the surrogate-rejection range is exactly U+D800..U+DFFF:
+	 * U+D7FF (ED 9F BF) and U+E000 (EE 80 80) bracket the range and must
+	 * still decode cleanly. The four interior values are each rejected.
+	 */
+	void testDecodeUTF8_SurrogateBoundaries()
 	{
-		const LogString greeting(LOG4CXX_STR("Hello, World"));
-		std::basic_string<UniChar> encoded;
-		Transcoder::encode(greeting, encoded);
-		const UniChar expected[] = { 'H', 'e', 'l', 'l', 'o', ',', ' ', 'W', 'o', 'r', 'l', 'd', 0 };
-		LOGUNIT_ASSERT_EQUAL(std::basic_string<UniChar>(expected), encoded);
+		struct { const char* bytes; size_t len; bool reject; } cases[] =
+		{
+			{ "\xED\x9F\xBF", 3, false }, // U+D7FF — last valid before surrogates
+			{ "\xED\xA0\x80", 3, true  }, // U+D800 — high-surrogate min (reject)
+			{ "\xED\xAF\xBF", 3, true  }, // U+DBFF — high-surrogate max (reject)
+			{ "\xED\xB0\x80", 3, true  }, // U+DC00 — low-surrogate min  (reject)
+			{ "\xED\xBF\xBF", 3, true  }, // U+DFFF — low-surrogate max  (reject)
+			{ "\xEE\x80\x80", 3, false }, // U+E000 — first valid after surrogates
+		};
+		for (auto& c : cases)
+		{
+			std::string src(c.bytes, c.len);
+			LogString out;
+			Transcoder::decodeUTF8(src, out);
+			LOGUNIT_ASSERT_EQUAL(c.reject, Transcoder::hasReplacementCharacter(out));
+		}
 	}
 
-	void uencode3()
+	/**
+	 * RFC 3629 §3 caps UTF-8 at U+10FFFF. Four-byte sequences with lead F5,
+	 * F6, F7 (and F4 with an over-high trailer) decode to values above the
+	 * Unicode maximum. Without bounds-rejection here, Transcoder::encodeUTF16
+	 * later silently aliases the bogus value to a valid in-range code point
+	 * (e.g. U+110000 collides with U+10000) — a substitution-collision
+	 * filter-bypass primitive in wchar builds.
+	 */
+	void testDecodeUTF8_RejectAboveMax()
 	{
-		LogString greeting(BUFSIZE - 3, LOG4CXX_STR('A'));
-		greeting.append(LOG4CXX_STR("Hello"));
-		std::basic_string<UniChar> encoded;
-		Transcoder::encode(greeting, encoded);
-		std::basic_string<UniChar> manyAs(BUFSIZE - 3, 'A');
-		LOGUNIT_ASSERT_EQUAL(manyAs, encoded.substr(0, BUFSIZE - 3));
-		const UniChar hello[] = { 'H', 'e', 'l', 'l', 'o', 0 };
-		LOGUNIT_ASSERT_EQUAL(std::basic_string<UniChar>(hello), encoded.substr(BUFSIZE - 3));
+		// F4 90 80 80 would encode U+110000 (one past the maximum).
+		std::string src("\xF4\x90\x80\x80");
+		LogString out;
+		Transcoder::decodeUTF8(src, out);
+
+		LOGUNIT_ASSERT(Transcoder::hasReplacementCharacter(out));
 	}
 
-	void uencode5()
+	/**
+	 * Boundary check around U+10FFFF: the canonical encoding of the
+	 * maximum legal code point (F4 8F BF BF) must decode cleanly; one past
+	 * (F4 90 80 80) and the F5/F6/F7 lead bytes must all be rejected.
+	 */
+	void testDecodeUTF8_MaxBoundary()
 	{
-		//   arbitrary, hopefully meaningless, characters from
-		//     Latin, Arabic, Armenian, Bengali, CJK and Cyrillic
-		const UniChar greeting[] = { L'A', 0x0605, 0x0530, 0x984, 0x40E3, 0x400, 0 };
-		//
-		//  decode to LogString (UTF-16 or UTF-8)
-		//
-		LogString decoded;
-		Transcoder::decode(greeting, decoded);
-		//
-		//  decode to basic_string<UniChar>
-		//
-		std::basic_string<UniChar> encoded;
-		Transcoder::encode(decoded, encoded);
-		//
-		//   should be lossless
-		//
-		LOGUNIT_ASSERT_EQUAL(std::basic_string<UniChar>(greeting), encoded);
+		struct { const char* bytes; size_t len; bool reject; } cases[] =
+		{
+			{ "\xF4\x8F\xBF\xBF", 4, false }, // U+10FFFF — maximum legal code point
+			{ "\xF4\x90\x80\x80", 4, true  }, // U+110000 — one past max (reject)
+			{ "\xF5\x80\x80\x80", 4, true  }, // F5 lead: rv = 0x140000 (reject)
+			{ "\xF6\x80\x80\x80", 4, true  }, // F6 lead: rv = 0x180000 (reject)
+			{ "\xF7\xBF\xBF\xBF", 4, true  }, // F7 lead: rv = 0x1FFFFF (reject)
+		};
+		for (auto& c : cases)
+		{
+			std::string src(c.bytes, c.len);
+			LogString out;
+			Transcoder::decodeUTF8(src, out);
+			LOGUNIT_ASSERT_EQUAL(c.reject, Transcoder::hasReplacementCharacter(out));
+		}
+	}
+
+	/**
+	 * Lead bytes F8..FF never start a valid UTF-8 sequence. The four-byte
+	 * branch masks the lead byte with 0x07, discarding those high bits, so
+	 * F8 BF BF BF used to slip past the U+10FFFF bound and decode to U+3FFFF
+	 * (and FB/FC likewise to other in-range planes) — the same aliasing
+	 * filter-bypass that the F5..F7 rejection guards against.
+	 */
+	void testDecodeUTF8_RejectInvalidLeadByte()
+	{
+		struct { const char* bytes; size_t len; bool reject; } cases[] =
+		{
+			{ "\xF0\x9F\x98\x80", 4, false }, // U+1F600 — valid four-byte
+			{ "\xF8\xBF\xBF\xBF", 4, true  }, // F8 lead: masked to U+3FFFF (reject)
+			{ "\xFB\xBF\xBF\xBF", 4, true  }, // FB lead: masked to U+FFFFF (reject)
+			{ "\xFC\x8F\xBF\xBF", 4, true  }, // FC lead: masked to U+10FFFF (reject)
+			{ "\xFF\xBF\xBF\xBF", 4, true  }, // FF lead (reject)
+		};
+		for (auto& c : cases)
+		{
+			std::string src(c.bytes, c.len);
+			LogString out;
+			Transcoder::decodeUTF8(src, out);
+			LOGUNIT_ASSERT_EQUAL(c.reject, Transcoder::hasReplacementCharacter(out));
+		}
+	}
+
+	/**
+	 * U+FFFF (EF BF BF) is a legal three-byte sequence whose scalar value
+	 * collides with the 0xFFFF error sentinel returned by Transcoder::decode.
+	 * decode() consumes all three bytes and returns 0xFFFF, but decodeUTF8
+	 * mistakes that for a decode failure (which leaves the iterator parked)
+	 * and advances the iterator a second time. The byte following U+FFFF is
+	 * therefore silently dropped. Here the trailing 'A' must survive.
+	 */
+	void testDecodeUTF8_FFFF_KeepsFollowingByte()
+	{
+		std::string src("\xEF\xBF\xBF\x41"); // U+FFFF then 'A'
+		LogString out;
+		Transcoder::decodeUTF8(src, out);
+		LOGUNIT_ASSERT(out.find(LOG4CXX_STR("A")) != LogString::npos);
+	}
+
+	void testEncodeUTF16BE_BMP()
+	{
+		char raw[4] = { 0, 0, 0, 0 };
+		ByteBuffer buf(raw, sizeof(raw));
+		Transcoder::encodeUTF16BE(0x4E03, buf); // CJK 七
+		LOGUNIT_ASSERT_EQUAL((size_t) 2, buf.position());
+		LOGUNIT_ASSERT_EQUAL((unsigned char) 0x4E, (unsigned char) raw[0]);
+		LOGUNIT_ASSERT_EQUAL((unsigned char) 0x03, (unsigned char) raw[1]);
+	}
+
+	// U+1F600 (GRINNING FACE) encodes to UTF-16BE as D8 3D DE 00.
+	// Before the fix the low surrogate's high byte was derived from bits 4-5
+	// of the code point, yielding 0xDC here instead of 0xDE — corrupting the
+	// pair into two unpaired surrogates.
+	void testEncodeUTF16BE_Supplementary()
+	{
+		char raw[4] = { 0, 0, 0, 0 };
+		ByteBuffer buf(raw, sizeof(raw));
+		Transcoder::encodeUTF16BE(0x1F600, buf);
+		LOGUNIT_ASSERT_EQUAL((size_t) 4, buf.position());
+		LOGUNIT_ASSERT_EQUAL((unsigned char) 0xD8, (unsigned char) raw[0]);
+		LOGUNIT_ASSERT_EQUAL((unsigned char) 0x3D, (unsigned char) raw[1]);
+		LOGUNIT_ASSERT_EQUAL((unsigned char) 0xDE, (unsigned char) raw[2]);
+		LOGUNIT_ASSERT_EQUAL((unsigned char) 0x00, (unsigned char) raw[3]);
+	}
+
+	void testEncodeUTF16LE_Supplementary()
+	{
+		char raw[4] = { 0, 0, 0, 0 };
+		ByteBuffer buf(raw, sizeof(raw));
+		Transcoder::encodeUTF16LE(0x1F600, buf);
+		LOGUNIT_ASSERT_EQUAL((size_t) 4, buf.position());
+		LOGUNIT_ASSERT_EQUAL((unsigned char) 0x3D, (unsigned char) raw[0]);
+		LOGUNIT_ASSERT_EQUAL((unsigned char) 0xD8, (unsigned char) raw[1]);
+		LOGUNIT_ASSERT_EQUAL((unsigned char) 0x00, (unsigned char) raw[2]);
+		LOGUNIT_ASSERT_EQUAL((unsigned char) 0xDE, (unsigned char) raw[3]);
+	}
+
+#if LOG4CXX_WCHAR_T_API || LOG4CXX_LOGCHAR_IS_WCHAR || defined(WIN32) || defined(_WIN32)
+	void testEncodeWString_FFFF_KeepsFollowingByte()
+	{
+		LogString src;
+#if LOG4CXX_LOGCHAR_IS_UTF8
+		src = "\xEF\xBF\xBF\x41"; // U+FFFF then 'A'
+#else
+		src.append(1, 0xFFFF);
+		src.append(1, 0x41);
+#endif
+		std::wstring out;
+		Transcoder::encode(src, out);
+		LOGUNIT_ASSERT(out.find(L"A") != std::wstring::npos);
 	}
 #endif
+
+
 
 #if LOG4CXX_LOGCHAR_IS_UTF8
 	void encodeCharsetName1()

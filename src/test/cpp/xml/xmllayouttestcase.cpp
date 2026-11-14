@@ -82,8 +82,10 @@ public:
 
 	void tearDown()
 	{
-		log4cxx::spi::LoggerRepositoryPtr rep = logger->getLoggerRepository().lock();
-		if (rep) {
+		auto rep = logger->getLoggerRepository();
+
+		if (rep)
+		{
 			rep->resetConfiguration();
 		}
 	}
@@ -109,7 +111,7 @@ public:
 		{
 			Transformer::transform(tempFileName, filteredFile, filters);
 		}
-		catch (UnexpectedFormatException& e)
+		catch (const UnexpectedFormatException& e)
 		{
 			std::cout << "UnexpectedFormatException :" << e.what() << std::endl;
 			throw;
@@ -145,7 +147,7 @@ public:
 		{
 			Transformer::transform(tempFileName, filteredFile, filters);
 		}
-		catch (UnexpectedFormatException& e)
+		catch (const UnexpectedFormatException& e)
 		{
 			std::cout << "UnexpectedFormatException :" << e.what() << std::endl;
 			throw;
@@ -174,7 +176,7 @@ public:
 		LOG4CXX_TRACE(logger,
 			LOG4CXX_TEST_STR("Message with embedded <![CDATA[<hello>hi</hello>]]>."));
 		LOG4CXX_DEBUG(logger,
-			LOG4CXX_TEST_STR("Message with embedded <![CDATA[<hello>hi</hello>]]>."));
+			LOG4CXX_TEST_STR("Message with terminating <![CDATA[<hello>hi</hello>]]>"));
 
 		XMLTimestampFilter xmlTimestampFilter;
 		XMLThreadFilter xmlThreadFilter;
@@ -191,7 +193,7 @@ public:
 		{
 			Transformer::transform(tempFileName, filteredFile, filters);
 		}
-		catch (UnexpectedFormatException& e)
+		catch (const UnexpectedFormatException& e)
 		{
 			std::cout << "UnexpectedFormatException :" << e.what() << std::endl;
 			throw;
@@ -224,7 +226,7 @@ public:
 		{
 			Transformer::transform(tempFileName, filteredFile, filters);
 		}
-		catch (UnexpectedFormatException& e)
+		catch (const UnexpectedFormatException& e)
 		{
 			std::cout << "UnexpectedFormatException :" << e.what() << std::endl;
 			throw;
@@ -262,7 +264,7 @@ public:
 		{
 			Transformer::transform(tempFileName, filteredFile, filters);
 		}
-		catch (UnexpectedFormatException& e)
+		catch (const UnexpectedFormatException& e)
 		{
 			std::cout << "UnexpectedFormatException :" << e.what() << std::endl;
 			throw;
@@ -301,7 +303,7 @@ public:
 		{
 			Transformer::transform(tempFileName, filteredFile, filters);
 		}
-		catch (UnexpectedFormatException& e)
+		catch (const UnexpectedFormatException& e)
 		{
 			std::cout << "UnexpectedFormatException :" << e.what() << std::endl;
 			throw;

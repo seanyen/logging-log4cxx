@@ -18,6 +18,7 @@
 #include "../logunit.h"
 #include <log4cxx/logger.h>
 #include <log4cxx/xml/xmllayout.h>
+#include <log4cxx/htmllayout.h>
 #include <log4cxx/fileappender.h>
 #include <log4cxx/mdc.h>
 
@@ -36,8 +37,9 @@
 #include <log4cxx/mdc.h>
 #include "../xml/xlevel.h"
 #include <log4cxx/helpers/bytebuffer.h>
+#include <log4cxx/helpers/pool.h>
 #include <log4cxx/helpers/transcoder.h>
-
+#include <log4cxx/helpers/loglog.h>
 
 using namespace log4cxx;
 using namespace log4cxx::helpers;
@@ -67,6 +69,7 @@ LOGUNIT_CLASS(XMLLayoutTest)
 	LOGUNIT_TEST(testActivateOptions);
 	LOGUNIT_TEST(testProblemCharacters);
 	LOGUNIT_TEST(testNDCWithCDATA);
+	LOGUNIT_TEST(testHTMLLayout);
 	LOGUNIT_TEST_SUITE_END();
 
 
@@ -113,9 +116,8 @@ public:
 	 */
 	void testGetHeader()
 	{
-		Pool p;
 		LogString header;
-		XMLLayout().appendHeader(header, p);
+		XMLLayout().appendHeader(header);
 		LOGUNIT_ASSERT_EQUAL((size_t) 0, header.size());
 	}
 
@@ -124,9 +126,8 @@ public:
 	 */
 	void testGetFooter()
 	{
-		Pool p;
 		LogString footer;
-		XMLLayout().appendFooter(footer, p);
+		XMLLayout().appendFooter(footer);
 		LOGUNIT_ASSERT_EQUAL((size_t) 0, footer.size());
 	}
 
@@ -280,7 +281,7 @@ public:
 		Pool p;
 		XMLLayout layout;
 		LogString result;
-		layout.format(result, event, p);
+		layout.format(result, event);
 		apr_xml_elem* parsedResult = parse(result, p);
 		checkEventElement(parsedResult, event);
 
@@ -306,7 +307,7 @@ public:
 	void testFormatWithNDC()
 	{
 		LogString logger = LOG4CXX_STR("org.apache.log4j.xml.XMLLayoutTest");
-		NDC::push("NDC goes here");
+		NDC::push("\001NDC goes here\004");
 
 		LoggingEventPtr event = LoggingEventPtr(
 				new LoggingEvent(
@@ -314,7 +315,7 @@ public:
 		Pool p;
 		XMLLayout layout;
 		LogString result;
-		layout.format(result, event, p);
+		layout.format(result, event);
 		NDC::pop();
 
 		apr_xml_elem* parsedResult = parse(result, p);
@@ -334,7 +335,7 @@ public:
 			}
 			else
 			{
-				checkNDCElement(node, "NDC goes here");
+				checkNDCElement(node, "&#x1;NDC goes here&#x4;");
 			}
 		}
 
@@ -359,9 +360,8 @@ public:
 	 */
 	void testActivateOptions()
 	{
-		Pool p;
 		XMLLayout layout;
-		layout.activateOptions(p);
+		layout.activateOptions();
 	}
 
 	/**
@@ -370,19 +370,31 @@ public:
 	 */
 	void testProblemCharacters()
 	{
-		std::string problemName = "com.example.bar<>&\"'";
-		LogString problemNameLS = LOG4CXX_STR("com.example.bar<>&\"'");
-		LevelPtr level = LevelPtr(new XLevel(6000, problemNameLS, 7));
+		// '\"<räksmörgås.josefsson.org>&\"'
+		std::string problemName = "'\"<\162\303\244\153\163\155\303\266\162\147\303\245\163\056\152\157\163\145\146\163\163\157\156\056\157\162\147>&\"'";
+		LOG4CXX_DECODE_CHAR(problemNameLS, problemName);
+		auto loggerNameLS = problemNameLS;
+		auto levelNameLS = problemNameLS;
+		Transcoder::encode(0xD822, problemNameLS); // Add an invalid character that should be stripped from attribute values
+		auto keyLS = problemNameLS;
+		auto expectedKeyValue = problemName;
+		// UTF-8 encodes the Unicode replacement character (0xFFFD) as the following:
+		expectedKeyValue += "\xEF\xBF\xBD";
+		std::string problemMessage = "'\001\"<Hello >\"\004'";
+		std::string expectedCdataValue = "'&#x1;\"<Hello >\"&#x4;'";
+		std::string expectedAttributeValue = "'\"<Hello >\"'"; // Invalid characters stripped
+		LOG4CXX_DECODE_CHAR(problemMessageLS, problemMessage);
+		LevelPtr level = LevelPtr(new XLevel(6000, levelNameLS, 7));
 		NDC::push(problemName);
 		MDC::clear();
-		MDC::put(problemName, problemName);
-		LoggingEventPtr event = LoggingEventPtr(
-				new LoggingEvent(problemNameLS, level, problemNameLS, LOG4CXX_LOCATION));
+		MDC::put(keyLS, problemMessageLS);
+		auto event = std::make_shared<LoggingEvent>
+				(loggerNameLS, level, problemMessageLS, LOG4CXX_LOCATION);
 		XMLLayout layout;
 		layout.setProperties(true);
 		Pool p;
 		LogString result;
-		layout.format(result, event, p);
+		layout.format(result, event);
 		MDC::clear();
 
 		apr_xml_elem* parsedResult = parse(result, p);
@@ -399,7 +411,7 @@ public:
 			switch (childElementCount)
 			{
 				case 1:
-					checkMessageElement(node, problemName);
+					checkMessageElement(node, expectedCdataValue);
 					break;
 
 				case 2:
@@ -407,7 +419,7 @@ public:
 					break;
 
 				case 3:
-					checkPropertiesElement(node, problemName.c_str(), problemName.c_str());
+					checkPropertiesElement(node, expectedKeyValue.c_str(), expectedAttributeValue.c_str());
 					break;
 
 				default:
@@ -434,7 +446,7 @@ public:
 		XMLLayout layout;
 		Pool p;
 		LogString result;
-		layout.format(result, event, p);
+		layout.format(result, event);
 		NDC::clear();
 		apr_xml_elem* parsedResult = parse(result, p);
 		int ndcCount = 0;
@@ -451,6 +463,56 @@ public:
 		}
 
 		LOGUNIT_ASSERT_EQUAL(1, ndcCount);
+	}
+
+	/**
+	 * Tests problematic characters in multiple fields.
+	 * @throws Exception if parser can not be constructed or source is not a valid XML document.
+	 */
+	void testHTMLLayout()
+	{
+		LogString problemName = LOG4CXX_STR("com.example.bar<>&\"'\n\t");
+		auto level = std::make_shared<XLevel>(6000, problemName, 7);
+		NDC context(problemName);
+		auto event = std::make_shared<LoggingEvent>(problemName, level, problemName, LOG4CXX_LOCATION);
+
+		HTMLLayout layout;
+		LogString html(LOG4CXX_STR("<body>"));
+		layout.format(html, event);
+		html += LOG4CXX_STR("</body>");
+
+		LogLog::debug(html);
+		char backing[3000];
+		ByteBuffer buf(backing, sizeof(backing));
+		CharsetEncoderPtr encoder(CharsetEncoder::getUTF8Encoder());
+		LogString::const_iterator iter{ html.begin() };
+		encoder->encode(html, iter, buf);
+		LOGUNIT_ASSERT(iter == html.end());
+		buf.flip();
+
+		LOGUNIT_ASSERT(html.find(LOG4CXX_STR(
+			"title=\"com.example.bar&lt;&gt;&amp;&quot;&#x27;&#xa;&#x9; logger\"")) != LogString::npos);
+
+		Pool p;
+		auto parser = apr_xml_parser_create(p.getAPRPool());
+		LOGUNIT_ASSERT(parser != 0);
+		auto stat = apr_xml_parser_feed(parser, buf.data(), buf.remaining());
+		LOGUNIT_ASSERT(stat == APR_SUCCESS);
+		apr_xml_doc* doc = 0;
+		stat = apr_xml_parser_done(parser, &doc);
+		LOGUNIT_ASSERT(doc != 0);
+		auto parsedResult = doc->root;
+		LOGUNIT_ASSERT(parsedResult != 0);
+
+		int childElementCount = 0;
+		for ( auto node = parsedResult->first_child
+		    ; node != NULL
+		    ; node = node->next)
+		{
+			++childElementCount;
+			LOGUNIT_ASSERT_EQUAL(std::string("tr"), std::string(node->name));
+		}
+		LOGUNIT_ASSERT(1 < childElementCount);
 	}
 
 };

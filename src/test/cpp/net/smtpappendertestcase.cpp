@@ -18,28 +18,27 @@
 #define LOG4CXX_TEST 1
 #include <log4cxx/private/log4cxx_private.h>
 
-#if LOG4CXX_HAVE_SMTP
-
 #include <log4cxx/net/smtpappender.h>
 #include "../appenderskeletontestcase.h"
 #include <log4cxx/xml/domconfigurator.h>
 #include <log4cxx/logmanager.h>
-#include <log4cxx/ttcclayout.h>
+#include <log4cxx/file.h>
+#include <log4cxx/simplelayout.h>
+#include <log4cxx/spi/configurator.h>
+#include <log4cxx/helpers/fileinputstream.h>
+#include <log4cxx/helpers/loglog.h>
+#include <log4cxx/helpers/properties.h>
+#include <log4cxx/helpers/onlyonceerrorhandler.h>
+#include <log4cxx/helpers/system.h>
+#include <fstream>
 
-using namespace log4cxx;
-using namespace log4cxx::helpers;
-using namespace log4cxx::net;
-using namespace log4cxx::xml;
-using namespace log4cxx::spi;
-
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 namespace net
 {
 
 class MockTriggeringEventEvaluator :
-	public virtual spi::TriggeringEventEvaluator,
-	public virtual helpers::ObjectImpl
+	public spi::TriggeringEventEvaluator
 {
 	public:
 		DECLARE_LOG4CXX_OBJECT(MockTriggeringEventEvaluator)
@@ -52,7 +51,7 @@ class MockTriggeringEventEvaluator :
 		{
 		}
 
-		virtual bool isTriggeringEvent(const spi::LoggingEventPtr& event)
+		bool isTriggeringEvent(const spi::LoggingEventPtr& event) override
 		{
 			return true;
 		}
@@ -62,6 +61,10 @@ class MockTriggeringEventEvaluator :
 };
 }
 }
+
+using namespace log4cxx;
+using namespace log4cxx::helpers;
+using namespace log4cxx::net;
 
 IMPLEMENT_LOG4CXX_OBJECT(MockTriggeringEventEvaluator)
 
@@ -79,6 +82,11 @@ class SMTPAppenderTestCase : public AppenderSkeletonTestCase
 		LOGUNIT_TEST(testSetOptionThreshold);
 		LOGUNIT_TEST(testTrigger);
 		LOGUNIT_TEST(testInvalid);
+		LOGUNIT_TEST(testNegativeBufferSizeOption);
+		LOGUNIT_TEST(testSubjectStripsCRLF);
+		LOGUNIT_TEST(testAddressFieldsStripCRLF);
+		LOGUNIT_TEST(testCleanFieldsArePreserved);
+		LOGUNIT_TEST(testWithSMTPServer);
 		LOGUNIT_TEST_SUITE_END();
 
 
@@ -103,29 +111,155 @@ class SMTPAppenderTestCase : public AppenderSkeletonTestCase
 		 */
 		void testTrigger()
 		{
-			DOMConfigurator::configure("input/xml/smtpAppender1.xml");
-			SMTPAppenderPtr appender(Logger::getRootLogger()->getAppender(LOG4CXX_STR("A1")));
-			TriggeringEventEvaluatorPtr evaluator(appender->getEvaluator());
+			auto status = xml::DOMConfigurator::configure("input/xml/smtpAppender1.xml");
+			LOGUNIT_ASSERT_EQUAL(status, spi::ConfigurationStatus::Configured);
+			auto appender = log4cxx::cast<SMTPAppender>(Logger::getRootLogger()->getAppender(LOG4CXX_STR("A1")));
+			LOGUNIT_ASSERT(appender);
+			auto evaluator = appender->getEvaluator();
+			LOGUNIT_ASSERT(evaluator);
 			LOGUNIT_ASSERT_EQUAL(true, evaluator->instanceof(MockTriggeringEventEvaluator::getStaticClass()));
 		}
 
 		void testInvalid()
 		{
-			SMTPAppenderPtr appender(new SMTPAppender());
+			auto appender = std::make_shared<SMTPAppender>();
 			appender->setSMTPHost(LOG4CXX_STR("smtp.invalid"));
 			appender->setTo(LOG4CXX_STR("you@example.invalid"));
 			appender->setFrom(LOG4CXX_STR("me@example.invalid"));
-			appender->setLayout(new TTCCLayout());
-			Pool p;
-			appender->activateOptions(p);
-			LoggerPtr root(Logger::getRootLogger());
+			appender->setLayout(std::make_shared<SimpleLayout>());
+			appender->activateOptions();
+			auto root = Logger::getRootLogger();
 			root->addAppender(appender);
-			LOG4CXX_INFO(root, "Hello, World.")
-			LOG4CXX_ERROR(root, "Sending Message")
+			LOG4CXX_INFO(root, "Hello, World.");
+			LOG4CXX_ERROR(root, "Sending Message"); // The DefaultEvaluator should trigger e-mail generation
+			auto eh = dynamic_cast<helpers::OnlyOnceErrorHandler*>(appender->getErrorHandler().get());
+			LOGUNIT_ASSERT(eh);
+			LOGUNIT_ASSERT(eh->errorReported());
 		}
 
+		void testNegativeBufferSizeOption()
+		{
+			SMTPAppender appender;
+			appender.setOption(LOG4CXX_STR("BUFFERSIZE"), LOG4CXX_STR("-10"));
+			LOGUNIT_ASSERT_EQUAL(1, appender.getBufferSize());
+		}
+
+		/**
+		 * SMTPSession::toAscii is the library's sanitization step for values
+		 * destined for SMTP headers via libesmtp; it rewrites non-ASCII to '?'
+		 * but does not touch CR/LF. Before the fix, a Subject containing CRLF
+		 * was passed verbatim to smtp_set_header — RFC 5322 §2.1 treats CRLF
+		 * as the header-field terminator, so an attacker controlling a
+		 * configured Subject (e.g. via property substitution) could inject a
+		 * fresh Bcc/Cc header. Each public setter must strip CR (0x0D) and
+		 * LF (0x0A) so the boundary is enforced regardless of how the value
+		 * reaches the appender.
+		 */
+		void testSubjectStripsCRLF()
+		{
+			SMTPAppender appender;
+			appender.setSubject(LOG4CXX_STR("Notification\r\nBcc: attacker@example.invalid"));
+			LOGUNIT_ASSERT_EQUAL(
+				LogString(LOG4CXX_STR("NotificationBcc: attacker@example.invalid")),
+				appender.getSubject());
+
+			appender.setSubject(LOG4CXX_STR("alert\nfollow-up"));
+			LOGUNIT_ASSERT_EQUAL(
+				LogString(LOG4CXX_STR("alertfollow-up")),
+				appender.getSubject());
+
+			appender.setSubject(LOG4CXX_STR("loose\rCR"));
+			LOGUNIT_ASSERT_EQUAL(
+				LogString(LOG4CXX_STR("looseCR")),
+				appender.getSubject());
+		}
+
+		void testAddressFieldsStripCRLF()
+		{
+			SMTPAppender appender;
+			appender.setFrom(LOG4CXX_STR("me@example.invalid\r\nBcc: x@y"));
+			appender.setTo(LOG4CXX_STR("you@example.invalid\nBcc: x@y"));
+			appender.setCc(LOG4CXX_STR("a@b\r,c@d"));
+			appender.setBcc(LOG4CXX_STR("z@example.invalid\n"));
+
+			LOGUNIT_ASSERT_EQUAL(
+				LogString(LOG4CXX_STR("me@example.invalidBcc: x@y")),
+				appender.getFrom());
+			LOGUNIT_ASSERT_EQUAL(
+				LogString(LOG4CXX_STR("you@example.invalidBcc: x@y")),
+				appender.getTo());
+			LOGUNIT_ASSERT_EQUAL(
+				LogString(LOG4CXX_STR("a@b,c@d")),
+				appender.getCc());
+			LOGUNIT_ASSERT_EQUAL(
+				LogString(LOG4CXX_STR("z@example.invalid")),
+				appender.getBcc());
+		}
+
+		void testCleanFieldsArePreserved()
+		{
+			// Whitespace, tabs, commas, and non-ASCII are deliberately untouched
+			// here: only CR/LF are stripped. toAscii continues to handle non-ASCII
+			// at SMTP-message construction time.
+			SMTPAppender appender;
+			appender.setSubject(LOG4CXX_STR("  Spaced subject\t"));
+			appender.setTo(LOG4CXX_STR("a@example.invalid, b@example.invalid"));
+			LOGUNIT_ASSERT_EQUAL(
+				LogString(LOG4CXX_STR("  Spaced subject\t")),
+				appender.getSubject());
+			LOGUNIT_ASSERT_EQUAL(
+				LogString(LOG4CXX_STR("a@example.invalid, b@example.invalid")),
+				appender.getTo());
+		}
+
+		void testWithSMTPServer()
+		{
+			LogString credentialsFileNameVar = LOG4CXX_STR("SMTP_TEST_CREDENTIALS_FILE_PATH");
+			auto credentialsFileName = helpers::System::getProperty(credentialsFileNameVar);
+			if (credentialsFileName.empty())
+			{
+				helpers::LogLog::warn(
+					LOG4CXX_STR("Set the " + credentialsFileNameVar + " environment variable"
+					" and re-run testWithSMTPServer to initialise it with the required values")
+					);
+				return;
+			}
+			File credentialsFile(credentialsFileName);
+			if (!credentialsFile.exists())
+			{
+				std::ofstream f(credentialsFileName);
+				const char credentials[] =
+					"LOG4CXX_TEST_EMAIL_RECIPIENT=\n"
+					"LOG4CXX_TEST_SMTP_HOST_NAME=\n"
+					"LOG4CXX_TEST_SMTP_HOST_PORT=587\n"
+					"LOG4CXX_TEST_SMTP_HOST_ACCOUNT=\n"
+					"LOG4CXX_TEST_SMTP_HOST_ACCOUNT_PASSWORD=\n"
+					"LOG4CXX_TEST_SMTP_HOST_PLAIN_TEXT_CREDENTIALS=false\n"
+					;
+				f.write(credentials, sizeof (credentials));
+				f.close();
+				LOGUNIT_ASSERT(credentialsFile.exists());
+				helpers::LogLog::warn(LOG4CXX_STR("Enter credentials into '") + credentialsFileName + LOG4CXX_STR("' and re-run testWithSMTPServer"));
+				return;
+			}
+			auto credentialsStream = std::make_shared<helpers::FileInputStream>(credentialsFile);
+			helpers::Properties& credentials = spi::Configurator::properties();
+			credentials.load(credentialsStream);
+			LOGUNIT_ASSERT(!credentials.getProperty(LOG4CXX_STR("LOG4CXX_TEST_SMTP_HOST_NAME")).empty());
+			LOGUNIT_ASSERT(!credentials.getProperty(LOG4CXX_STR("LOG4CXX_TEST_SMTP_HOST_PORT")).empty());
+			LOGUNIT_ASSERT(!credentials.getProperty(LOG4CXX_STR("LOG4CXX_TEST_EMAIL_RECIPIENT")).empty());
+			auto status = xml::DOMConfigurator::configure("input/xml/smtpAppenderValid.xml");
+			LOGUNIT_ASSERT_EQUAL(status, spi::ConfigurationStatus::Configured);
+			auto root = Logger::getRootLogger();
+			LOG4CXX_INFO(root, "Hello, World.\n\nThis paragraph should be preceeded by a blank line.");
+
+			auto appender = log4cxx::cast<SMTPAppender>(root->getAppender(LOG4CXX_STR("A1")));
+			LOGUNIT_ASSERT(appender);
+			auto eh = dynamic_cast<helpers::OnlyOnceErrorHandler*>(appender->getErrorHandler().get());
+			LOGUNIT_ASSERT(eh);
+			LOGUNIT_ASSERT(!eh->errorReported());
+		}
 };
 
 LOGUNIT_TEST_SUITE_REGISTRATION(SMTPAppenderTestCase);
 
-#endif

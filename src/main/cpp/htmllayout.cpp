@@ -24,24 +24,44 @@
 #include <log4cxx/helpers/iso8601dateformat.h>
 #include <log4cxx/helpers/stringhelper.h>
 #include <log4cxx/helpers/transcoder.h>
+#include <log4cxx/helpers/date.h>
+#include <log4cxx/private/layout_priv.h>
 
-#include <apr_time.h>
-#include <apr_strings.h>
-#include <string.h>
+using namespace LOG4CXX_NS;
+using namespace LOG4CXX_NS::helpers;
+using namespace LOG4CXX_NS::spi;
 
-using namespace log4cxx;
-using namespace log4cxx::helpers;
-using namespace log4cxx::spi;
+struct HTMLLayout::HTMLLayoutPrivate
+{
+	HTMLLayoutPrivate()
+		: locationInfo(false)
+		, title(LOG4CXX_STR("Log4cxx Log Messages"))
+		, dateFormat()
+		, expectedPatternLength(100)
+		{}
+
+	// Print no location info by default
+	bool locationInfo; //= false
+
+	LogString title;
+
+	helpers::ISO8601DateFormat dateFormat;
+
+	// Expected length of a formatted event excluding the message text
+	size_t expectedPatternLength;
+};
 
 IMPLEMENT_LOG4CXX_OBJECT(HTMLLayout)
 
 
 HTMLLayout::HTMLLayout()
-	: locationInfo(false), title(LOG4CXX_STR("Log4cxx Log Messages")),
-	  dateFormat()
+	: m_priv(std::make_unique<HTMLLayoutPrivate>())
 {
-	dateFormat.setTimeZone(TimeZone::getGMT());
+	m_priv->dateFormat.setTimeZone(TimeZone::getGMT());
+	m_priv->expectedPatternLength = priv::doubledLayoutSize(getFormattedEventCharacterCount());
 }
+
+HTMLLayout::~HTMLLayout() {}
 
 
 void HTMLLayout::setOption(const LogString& option,
@@ -57,19 +77,22 @@ void HTMLLayout::setOption(const LogString& option,
 			LOG4CXX_STR("LOCATIONINFO"), LOG4CXX_STR("locationinfo")))
 	{
 		setLocationInfo(OptionConverter::toBoolean(value, false));
+		m_priv->expectedPatternLength = priv::doubledLayoutSize(getFormattedEventCharacterCount());
 	}
+	else
+		Layout::setOption(option, value);
 }
 
-void HTMLLayout::format(LogString& output,
-	const spi::LoggingEventPtr& event,
-	Pool& p) const
+void HTMLLayout::format( LogString& output, const spi::LoggingEventPtr& event ) const
 {
+	auto& lsMsg = event->getRenderedMessage();
+	priv::reserveFormattedEvent(output, m_priv->expectedPatternLength, lsMsg.size());
 	output.append(LOG4CXX_EOL);
 	output.append(LOG4CXX_STR("<tr>"));
 	output.append(LOG4CXX_EOL);
 	output.append(LOG4CXX_STR("<td>"));
 
-	dateFormat.format(output, event->getTimeStamp(), p);
+	m_priv->dateFormat.format(output, event->getTimeStamp());
 
 
 	output.append(LOG4CXX_STR("</td>"));
@@ -77,9 +100,9 @@ void HTMLLayout::format(LogString& output,
 
 	output.append(LOG4CXX_STR("<td title=\""));
 	LogString threadName(event->getThreadName());
-	output.append(threadName);
+	Transform::appendEscapingAttribute(output, threadName);
 	output.append(LOG4CXX_STR(" thread\">"));
-	output.append(threadName);
+	Transform::appendEscapingTags(output, threadName);
 	output.append(LOG4CXX_STR("</td>"));
 	output.append(LOG4CXX_EOL);
 
@@ -88,31 +111,31 @@ void HTMLLayout::format(LogString& output,
 	if (event->getLevel()->equals(Level::getDebug()))
 	{
 		output.append(LOG4CXX_STR("<font color=\"#339933\">"));
-		output.append(event->getLevel()->toString());
+		Transform::appendEscapingTags(output, event->getLevel()->toString());
 		output.append(LOG4CXX_STR("</font>"));
 	}
 	else if (event->getLevel()->isGreaterOrEqual(Level::getWarn()))
 	{
 		output.append(LOG4CXX_STR("<font color=\"#993300\"><strong>"));
-		output.append(event->getLevel()->toString());
+		Transform::appendEscapingTags(output, event->getLevel()->toString());
 		output.append(LOG4CXX_STR("</strong></font>"));
 	}
 	else
 	{
-		output.append(event->getLevel()->toString());
+		Transform::appendEscapingTags(output, event->getLevel()->toString());
 	}
 
 	output.append(LOG4CXX_STR("</td>"));
 	output.append(LOG4CXX_EOL);
 
 	output.append(LOG4CXX_STR("<td title=\""));
-	output.append(event->getLoggerName());
+	Transform::appendEscapingAttribute(output, event->getLoggerName());
 	output.append(LOG4CXX_STR(" logger\">"));
 	Transform::appendEscapingTags(output, event->getLoggerName());
 	output.append(LOG4CXX_STR("</td>"));
 	output.append(LOG4CXX_EOL);
 
-	if (locationInfo)
+	if (m_priv->locationInfo)
 	{
 		output.append(LOG4CXX_STR("<td>"));
 		const LocationInfo& locInfo = event->getLocationInformation();
@@ -123,7 +146,7 @@ void HTMLLayout::format(LogString& output,
 
 		if (line != 0)
 		{
-			StringHelper::toString(line, p, output);
+			StringHelper::toString(line, output);
 		}
 
 		output.append(LOG4CXX_STR("</td>"));
@@ -131,7 +154,7 @@ void HTMLLayout::format(LogString& output,
 	}
 
 	output.append(LOG4CXX_STR("<td title=\"Message\">"));
-	Transform::appendEscapingTags(output, event->getRenderedMessage());
+	Transform::appendEscapingTags(output, lsMsg);
 	output.append(LOG4CXX_STR("</td>"));
 	output.append(LOG4CXX_EOL);
 	output.append(LOG4CXX_STR("</tr>"));
@@ -151,7 +174,7 @@ void HTMLLayout::format(LogString& output,
 	}
 }
 
-void HTMLLayout::appendHeader(LogString& output, Pool& p)
+void HTMLLayout::appendHeader( LogString& output )
 {
 	output.append(LOG4CXX_STR("<!DOCTYPE HTML PUBLIC "));
 	output.append(LOG4CXX_STR("\"-//W3C//DTD HTML 4.01 Transitional//EN\" "));
@@ -162,7 +185,7 @@ void HTMLLayout::appendHeader(LogString& output, Pool& p)
 	output.append(LOG4CXX_STR("<head>"));
 	output.append(LOG4CXX_EOL);
 	output.append(LOG4CXX_STR("<title>"));
-	output.append(title);
+	Transform::appendEscapingTags(output, m_priv->title);
 	output.append(LOG4CXX_STR("</title>"));
 	output.append(LOG4CXX_EOL);
 	output.append(LOG4CXX_STR("<style type=\"text/css\">"));
@@ -185,7 +208,7 @@ void HTMLLayout::appendHeader(LogString& output, Pool& p)
 	output.append(LOG4CXX_EOL);
 	output.append(LOG4CXX_STR("Log session start time "));
 
-	dateFormat.format(output, apr_time_now(), p);
+	m_priv->dateFormat.format(output, Date::currentTime());
 
 	output.append(LOG4CXX_STR("<br>"));
 	output.append(LOG4CXX_EOL);
@@ -204,7 +227,7 @@ void HTMLLayout::appendHeader(LogString& output, Pool& p)
 	output.append(LOG4CXX_STR("<th>Logger</th>"));
 	output.append(LOG4CXX_EOL);
 
-	if (locationInfo)
+	if (m_priv->locationInfo)
 	{
 		output.append(LOG4CXX_STR("<th>File:Line</th>"));
 		output.append(LOG4CXX_EOL);
@@ -216,11 +239,41 @@ void HTMLLayout::appendHeader(LogString& output, Pool& p)
 	output.append(LOG4CXX_EOL);
 }
 
-void HTMLLayout::appendFooter(LogString& output, Pool& /* pool */ )
+void HTMLLayout::appendFooter( LogString& output  )
 {
 	output.append(LOG4CXX_STR("</table>"));
 	output.append(LOG4CXX_EOL);
 	output.append(LOG4CXX_STR("<br>"));
 	output.append(LOG4CXX_EOL);
 	output.append(LOG4CXX_STR("</body></html>"));
+}
+
+void HTMLLayout::setLocationInfo(bool locationInfoFlag)
+{
+	m_priv->locationInfo = locationInfoFlag;
+}
+
+bool HTMLLayout::getLocationInfo() const
+{
+	return m_priv->locationInfo;
+}
+
+void HTMLLayout::setTitle(const LogString& title1)
+{
+	m_priv->title.assign(title1);
+}
+
+const LogString& HTMLLayout::getTitle() const
+{
+	return m_priv->title;
+}
+
+LogString HTMLLayout::getContentType() const
+{
+	return LOG4CXX_STR("text/html");
+}
+
+bool HTMLLayout::ignoresThrowable() const
+{
+	return false;
 }

@@ -24,10 +24,40 @@
 #include <assert.h>
 #include <log4cxx/helpers/exception.h>
 
-using namespace log4cxx;
-using namespace log4cxx::helpers;
+using namespace LOG4CXX_NS;
+using namespace LOG4CXX_NS::helpers;
 
-File::File()
+struct File::FilePrivate{
+	FilePrivate()
+	{
+		set_apr_path();
+	}
+
+	FilePrivate(const LogString& path)
+		: path(path)
+	{
+		set_apr_path();
+	}
+
+	FilePrivate(const LogString& path, bool autoDelete)
+		: path(path)
+		, autoDelete(autoDelete)
+	{
+		set_apr_path();
+	}
+
+	LogString path;
+	bool autoDelete{ false };
+	Pool p;
+	const char* apr_path{ nullptr };
+	std::string encodedPath;
+
+	const char* getPath() const;
+	void set_apr_path();
+};
+
+File::File() :
+	m_priv(std::make_unique<FilePrivate>())
 {
 }
 
@@ -54,48 +84,37 @@ static LogString decodeLS(const std::basic_string<S>& src)
 
 
 File::File(const std::string& name1)
-	: path(decodeLS(name1))
+	: m_priv(std::make_unique<FilePrivate>(decodeLS(name1)))
 {
 }
 
 File::File(const char* name1)
-	: path(decodeLS(name1))
+	: m_priv(std::make_unique<FilePrivate>(decodeLS(name1)))
 {
 }
 
 #if LOG4CXX_WCHAR_T_API
 File::File(const std::wstring& name1)
-	: path(decodeLS(name1))
+	: m_priv(std::make_unique<FilePrivate>(decodeLS(name1)))
 {
 }
 
 File::File(const wchar_t* name1)
-	: path(decodeLS(name1))
+	: m_priv(std::make_unique<FilePrivate>(decodeLS(name1)))
 {
 }
 #endif
 
-#if LOG4CXX_UNICHAR_API
-File::File(const std::basic_string<UniChar>& name1)
-	: path(decodeLS(name1))
-{
-}
-
-File::File(const UniChar* name1)
-	: path(decodeLS(name1))
-{
-}
-#endif
 
 #if LOG4CXX_CFSTRING_API
 File::File(const CFStringRef& name1)
-	: path(decodeLS(name1))
+	: m_priv(std::make_unique<FilePrivate>(decodeLS(name1)))
 {
 }
 #endif
 
 File::File(const File& src)
-	: path(src.path)
+	: m_priv(std::make_unique<FilePrivate>(src.m_priv->path, src.m_priv->autoDelete))
 {
 }
 
@@ -106,109 +125,109 @@ File& File::operator=(const File& src)
 		return *this;
 	}
 
-	path.assign(src.path);
-
+	m_priv->path.assign(src.m_priv->path);
+	m_priv->autoDelete = src.m_priv->autoDelete;
+	m_priv->set_apr_path();
 	return *this;
 }
 
 
 File::~File()
 {
+	if(m_priv->autoDelete){
+		deleteFile();
+	}
 }
 
+bool File::hasPath() const
+{
+	return !m_priv->path.empty();
+}
 
 LogString File::getPath() const
 {
-	return path;
+	return m_priv->path;
 }
 
 File& File::setPath(const LogString& newName)
 {
-	path.assign(newName);
+	m_priv->path.assign(newName);
+	m_priv->set_apr_path();
 	return *this;
 }
 
 LogString File::getName() const
 {
 	const logchar slashes[] = { 0x2F, 0x5C, 0 };
-	size_t lastSlash = path.find_last_of(slashes);
+	size_t lastSlash = m_priv->path.find_last_of(slashes);
 
 	if (lastSlash != LogString::npos)
 	{
-		return path.substr(lastSlash + 1);
+		return m_priv->path.substr(lastSlash + 1);
 	}
 
-	return path;
+	return m_priv->path;
 }
 
-char* File::getPath(Pool& p) const
+const char* File::FilePrivate::getPath() const
 {
-	int style = APR_FILEPATH_ENCODING_UNKNOWN;
-	apr_filepath_encoding(&style, p.getAPRPool());
-	char* retval = NULL;
+	return this->apr_path;
+}
 
+void File::FilePrivate::set_apr_path()
+{
+	this->encodedPath.clear();
+	int style = APR_FILEPATH_ENCODING_UNKNOWN;
+	apr_filepath_encoding(&style, this->p.getAPRPool());
 	if (style == APR_FILEPATH_ENCODING_UTF8)
 	{
-		retval = Transcoder::encodeUTF8(path, p);
+		Transcoder::encodeUTF8(this->path, this->encodedPath);
 	}
 	else
 	{
-		retval = Transcoder::encode(path, p);
+		Transcoder::encode(this->path, this->encodedPath);
 	}
 
-	return retval;
-}
-
-log4cxx_status_t File::open(apr_file_t** file, int flags,
-	int perm, Pool& p) const
-{
-	return apr_file_open(file, getPath(p), flags, perm, p.getAPRPool());
-}
-
-
-
-bool File::exists(Pool& p) const
-{
-	apr_finfo_t finfo;
-	apr_status_t rv = apr_stat(&finfo, getPath(p),
-			0, p.getAPRPool());
-	return rv == APR_SUCCESS;
-}
-
-char* File::convertBackSlashes(char* src)
-{
-	for (char* c = src; *c != 0; c++)
+	for (auto& c : this->encodedPath)
 	{
-		if (*c == '\\')
+		if (c == '\\')
 		{
-			*c = '/';
+			c = '/';
 		}
 	}
-
-	return src;
+	this->apr_path = this->encodedPath.c_str();
 }
 
-bool File::deleteFile(Pool& p) const
+const char* File::getAPRPath() const
 {
-	apr_status_t rv = apr_file_remove(convertBackSlashes(getPath(p)),
-			p.getAPRPool());
-	return rv == APR_SUCCESS;
-}
-
-bool File::renameTo(const File& dest, Pool& p) const
-{
-	apr_status_t rv = apr_file_rename(convertBackSlashes(getPath(p)),
-			convertBackSlashes(dest.getPath(p)),
-			p.getAPRPool());
-	return rv == APR_SUCCESS;
+	return m_priv->getPath();
 }
 
 
-size_t File::length(Pool& pool) const
+bool File::exists() const
 {
 	apr_finfo_t finfo;
-	apr_status_t rv = apr_stat(&finfo, getPath(pool),
-			APR_FINFO_SIZE, pool.getAPRPool());
+	apr_status_t rv = apr_stat(&finfo, m_priv->getPath(), 0, m_priv->p.getAPRPool());
+	return rv == APR_SUCCESS;
+}
+
+bool File::deleteFile() const
+{
+	apr_status_t rv = apr_file_remove(m_priv->getPath(), m_priv->p.getAPRPool());
+	return rv == APR_SUCCESS;
+}
+
+bool File::renameTo(const File& dest) const
+{
+	apr_status_t rv = apr_file_rename(m_priv->getPath(), dest.m_priv->getPath(), m_priv->p.getAPRPool());
+	return rv == APR_SUCCESS;
+}
+
+
+size_t File::length() const
+{
+	apr_finfo_t finfo;
+	apr_status_t rv = apr_stat(&finfo, m_priv->getPath(), APR_FINFO_SIZE, m_priv->p.getAPRPool());
 
 	if (rv == APR_SUCCESS)
 	{
@@ -219,11 +238,10 @@ size_t File::length(Pool& pool) const
 }
 
 
-log4cxx_time_t File::lastModified(Pool& pool) const
+log4cxx_time_t File::lastModified() const
 {
 	apr_finfo_t finfo;
-	apr_status_t rv = apr_stat(&finfo, getPath(pool),
-			APR_FINFO_MTIME, pool.getAPRPool());
+	apr_status_t rv = apr_stat(&finfo, m_priv->getPath(), APR_FINFO_MTIME, m_priv->p.getAPRPool());
 
 	if (rv == APR_SUCCESS)
 	{
@@ -234,20 +252,18 @@ log4cxx_time_t File::lastModified(Pool& pool) const
 }
 
 
-std::vector<LogString> File::list(Pool& p) const
+std::vector<LogString> File::list() const
 {
 	apr_dir_t* dir;
 	apr_finfo_t entry;
 	std::vector<LogString> filenames;
 
-	apr_status_t stat = apr_dir_open(&dir,
-			convertBackSlashes(getPath(p)),
-			p.getAPRPool());
+	apr_status_t stat = apr_dir_open(&dir, m_priv->getPath(), m_priv->p.getAPRPool());
 
 	if (stat == APR_SUCCESS)
 	{
 		int style = APR_FILEPATH_ENCODING_UNKNOWN;
-		apr_filepath_encoding(&style, p.getAPRPool());
+		apr_filepath_encoding(&style, m_priv->p.getAPRPool());
 		stat = apr_dir_read(&entry, APR_FINFO_DIRENT, dir);
 
 		while (stat == APR_SUCCESS)
@@ -277,10 +293,10 @@ std::vector<LogString> File::list(Pool& p) const
 	return filenames;
 }
 
-LogString File::getParent(Pool&) const
+LogString File::getParent() const
 {
-	LogString::size_type slashPos = path.rfind(LOG4CXX_STR('/'));
-	LogString::size_type backPos = path.rfind(LOG4CXX_STR('\\'));
+	LogString::size_type slashPos = m_priv->path.rfind(LOG4CXX_STR('/'));
+	LogString::size_type backPos = m_priv->path.rfind(LOG4CXX_STR('\\'));
 
 	if (slashPos == LogString::npos)
 	{
@@ -298,15 +314,23 @@ LogString File::getParent(Pool&) const
 
 	if (slashPos != LogString::npos && slashPos > 0)
 	{
-		parent.assign(path, 0, slashPos);
+		parent.assign(m_priv->path, 0, slashPos);
 	}
 
 	return parent;
 }
 
-bool File::mkdirs(Pool& p) const
+bool File::mkdirs() const
 {
-	apr_status_t stat = apr_dir_make_recursive(convertBackSlashes(getPath(p)),
-			APR_OS_DEFAULT, p.getAPRPool());
+	apr_status_t stat = apr_dir_make_recursive(m_priv->getPath(), APR_OS_DEFAULT, m_priv->p.getAPRPool());
 	return stat == APR_SUCCESS;
 }
+
+void File::setAutoDelete(bool autoDelete){
+	m_priv->autoDelete = autoDelete;
+}
+
+bool File::getAutoDelete() const{
+	return m_priv->autoDelete;
+}
+

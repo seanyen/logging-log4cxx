@@ -19,39 +19,85 @@
 #define _LOG4CXX_SPI_CONFIGURATOR_H
 
 #include <log4cxx/spi/loggerrepository.h>
+#include <log4cxx/helpers/properties.h>
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 class File;
 
 namespace spi
 {
+
+enum class ConfigurationStatus{
+	Configured,
+	NotConfigured,
+};
+
 /**
-Implemented by classes capable of configuring log4j using a URL.
+An abstract base for classes capable of configuring Log4cxx.
 */
 class LOG4CXX_EXPORT Configurator : virtual public helpers::Object
 {
 	public:
 		DECLARE_ABSTRACT_LOG4CXX_OBJECT(Configurator)
-		Configurator();
+		BEGIN_LOG4CXX_CAST_MAP()
+		LOG4CXX_CAST_ENTRY(Configurator)
+		END_LOG4CXX_CAST_MAP()
 
 		/**
-		Interpret a resource pointed by a URL and set up log4j accordingly.
+		Does \c configFileName contain directives that this class uses?
 
-		The configuration is done relative to the <code>hierarchy</code>
-		parameter.
+		@param configFileName The file to examine
+		*/
+		virtual bool isValid(const File& configFileName) = 0;
+
+		/**
+		Apply the directives in \c configFileName to \c target.
+
+		If \c target is not provided,
+		the spi::LoggerRepository held by LogManager is used.
+
+		<b>The existing configuration is not cleared nor reset.</b>
+		If you require a different behavior,
+		call {@link spi::LoggerRepository::resetConfiguration resetConfiguration}
+		before calling <code>doConfigure</code>.
 
 		@param configFileName The file to parse
-		@param repository The hierarchy to operation upon.
+		@param target Holds the Logger instances.
 		*/
-		virtual void doConfigure(const File& configFileName,
-			spi::LoggerRepositoryPtr repository) = 0;
+		virtual ConfigurationStatus doConfigure
+			( const File&                     configFileName
+			, const spi::LoggerRepositoryPtr& target = {}
+			) = 0;
 
+		/**
+		The key value pairs used when expanding ${varname} instances in a configuration file.
+
+		By default, the map holds the currently executing program file path
+		and the [std::filesystem::path](https://en.cppreference.com/w/cpp/filesystem/path.html)
+		decomposition of the currently executing program file path, using the variable names:
+		- PROGRAM_FILE_PATH
+		- PROGRAM_FILE_PATH.ROOT_NAME
+		- PROGRAM_FILE_PATH.ROOT_DIRECTORY
+		- PROGRAM_FILE_PATH.ROOT_PATH
+		- PROGRAM_FILE_PATH.RELATIVE_PATH
+		- PROGRAM_FILE_PATH.PARENT_PATH
+		- PROGRAM_FILE_PATH.FILENAME
+		- PROGRAM_FILE_PATH.STEM
+		- PROGRAM_FILE_PATH.EXTENSION
+
+		@warning This method is not thread-safe. Only add entries during initialization.
+
+		@return a mutable map - modification and use must be confined to a single thread.
+		*/
+		static helpers::Properties& properties();
+
+	protected:
+		Configurator();
 
 	private:
 		Configurator(const Configurator&);
 		Configurator& operator=(const Configurator&);
-		bool initialized;
 };
 
 LOG4CXX_PTR_DEF(Configurator);

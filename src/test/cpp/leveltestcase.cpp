@@ -19,6 +19,7 @@
 #include <log4cxx/level.h>
 #include "testchar.h"
 #include "logunit.h"
+#include <log4cxx/helpers/loglog.h>
 
 #if LOG4CXX_CFSTRING_API
 	#include <CoreFoundation/CFString.h>
@@ -37,14 +38,20 @@ LOGUNIT_CLASS(LevelTestCase)
 #if LOG4CXX_WCHAR_T_API
 	LOGUNIT_TEST(testWideStringToTrace);
 #endif
-#if LOG4CXX_UNICHAR_API
-	LOGUNIT_TEST(testUniCharStringToTrace);
-#endif
 #if LOG4CXX_CFSTRING_API
 	LOGUNIT_TEST(testCFStringToTrace);
 #endif
 	LOGUNIT_TEST(testTrimmedToTrace);
 	LOGUNIT_TEST_SUITE_END();
+
+#ifdef _DEBUG
+	struct Fixture
+	{
+		Fixture() {
+			helpers::LogLog::setInternalDebugging(true);
+		}
+	} suiteFixture;
+#endif
 
 public:
 	void testToLevelFatal()
@@ -96,18 +103,6 @@ public:
 	void testWideStringToTrace()
 	{
 		LevelPtr trace(Level::toLevel(L"TRACE"));
-		LOGUNIT_ASSERT(trace->toString() == LOG4CXX_STR("TRACE"));
-	}
-#endif
-
-#if LOG4CXX_UNICHAR_API
-	/**
-	 * Tests Level.toLevel("TRACE");
-	 */
-	void testUniCharStringToTrace()
-	{
-		const log4cxx::UniChar name[] = { 'T', 'R', 'A', 'C', 'E', 0 };
-		LevelPtr trace(Level::toLevel(name));
 		LOGUNIT_ASSERT(trace->toString() == LOG4CXX_STR("TRACE"));
 	}
 #endif

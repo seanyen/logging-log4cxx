@@ -20,10 +20,9 @@
 
 #include <log4cxx/helpers/outputstream.h>
 #include <log4cxx/file.h>
-#include <log4cxx/helpers/pool.h>
 
 
-namespace log4cxx
+namespace LOG4CXX_NS
 {
 
 namespace helpers
@@ -31,12 +30,15 @@ namespace helpers
 
 /**
 *   OutputStream implemented on top of APR file IO.
+*
+*   This class assumes a single active thread: the file is opened lazily
+*   without synchronization.  The guarantee is provided by the mutex
+*   held in AppenderSkeleton::doAppend.
 */
 class LOG4CXX_EXPORT FileOutputStream : public OutputStream
 {
 	private:
-		Pool pool;
-		apr_file_t* fileptr;
+		LOG4CXX_DECLARE_PRIVATE_MEMBER_PTR(FileOutputStreamPrivate, m_priv)
 
 	public:
 		DECLARE_ABSTRACT_LOG4CXX_OBJECT(FileOutputStream)
@@ -45,25 +47,28 @@ class LOG4CXX_EXPORT FileOutputStream : public OutputStream
 		LOG4CXX_CAST_ENTRY_CHAIN(OutputStream)
 		END_LOG4CXX_CAST_MAP()
 
-		FileOutputStream(const LogString& filename, bool append = false);
-		FileOutputStream(const logchar* filename, bool append = false);
+		/**
+		Open \c filename unless \c lazyOpen is true,
+		in which case the file is opened on first write
+		(or when #getFilePtr is called)
+		and an existing file is truncated immediately if \c append is false.
+		*/
+		FileOutputStream(const LogString& filename, bool append = false, bool lazyOpen = false);
 		virtual ~FileOutputStream();
 
-		virtual void close(Pool& p);
-		virtual void flush(Pool& p);
-		virtual void write(ByteBuffer& buf, Pool& p);
+		using OutputStream::close;
+		void close(  ) override;
+		using OutputStream::flush;
+		void flush(  ) override;
+		using OutputStream::write;
+		void write( ByteBuffer& buf ) override;
 
-#ifdef LOG4CXX_MULTI_PROCESS
-		apr_file_t* getFilePtr()
-		{
-			return fileptr;
-		}
-#endif
+		apr_file_t* getFilePtr() const;
+
 	private:
-		FileOutputStream(const FileOutputStream&);
-		FileOutputStream& operator=(const FileOutputStream&);
-		static apr_file_t* open(const LogString& fn, bool append,
-			log4cxx::helpers::Pool& p);
+		FileOutputStream(const FileOutputStream&) = delete;
+		FileOutputStream(FileOutputStream&&) = delete;
+		FileOutputStream& operator=(const FileOutputStream&) = delete;
 };
 
 LOG4CXX_PTR_DEF(FileOutputStream);
